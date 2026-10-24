@@ -38,7 +38,6 @@ import {
   AdminConfigUpdate
 } from "@/types/api";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const API_KEY = process.env.NEXT_PUBLIC_DASHBOARD_API_KEY;
 
 class ApiError extends Error {
@@ -48,11 +47,20 @@ class ApiError extends Error {
   }
 }
 
+function getBaseUrl(): string {
+  // If running on the server (SSR / Server Components), connect directly to localhost
+  if (typeof window === "undefined") {
+    return process.env.INTERNAL_API_URL || "http://127.0.0.1:8000/api/v1";
+  }
+  // If running in the browser, use the public API URL
+  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+}
+
 async function request<T>(
   endpoint: string,
   options: RequestInit & { next?: NextFetchRequestConfig } = {}
 ): Promise<T> {
-  const url = `${BASE_URL}${endpoint}`;
+  const url = `${getBaseUrl()}${endpoint}`;
   
   const headers = new Headers(options.headers);
   if (API_KEY) {
