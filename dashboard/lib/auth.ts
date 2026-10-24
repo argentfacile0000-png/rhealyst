@@ -19,6 +19,7 @@ import { AuthOptions } from "next-auth";
 
 export const authOptions: AuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
+  debug: true,
   providers: [
     DiscordProvider({
       clientId: process.env.DISCORD_CLIENT_ID || "",
