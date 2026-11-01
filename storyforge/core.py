@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import secrets
 import time
 import urllib.parse
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import delete, func, select, update
 
@@ -24,6 +26,14 @@ from .scheduler import Scheduler
 log = logging.getLogger(__name__)
 
 PAUSE_KEY = "system_paused"
+PORTAL_TTL = 1800  # validité d'un lien de connexion des comptes (s)
+
+
+class OAuthResult(NamedTuple):
+    platform: str
+    channel: Channel
+    account: str
+    portal: str  # jeton du lien de connexion d'origine (vide si liaison depuis Telegram)
 
 
 class OAuthStates:
@@ -62,6 +72,7 @@ class Services:
         self.started_at = time.time()
         self._quota_cache: tuple[float, dict | None] = (0.0, None)
         self._failures: dict[int, tuple[int, float]] = {}  # chaîne -> (échecs consécutifs, reprise à)
+        self.bot_username = ""  # renseigné au démarrage du bot (liens « Retour sur Telegram »)
 
     def set_notifier(self, notifier: Notifier) -> None:
         self.notifier = notifier
@@ -307,15 +318,36 @@ class Services:
             await db.log_event(f"Vidéo #{video_id} jetée", "info", v.channel_id)
         return v
 
-    # ------------------------------------------------------------------ OAuth
-    def youtube_auth_url(self, channel_id: int) -> str:
+    # ------------------------------------------------------------------ comptes & OAuth
+    def portal_available(self) -> bool:
+        """La page de connexion n'est joignable que si le serveur web tourne derrière une URL https."""
         s = self.settings
-        redirect = f"{s.public_base}/oauth/youtube" if s.webapp_url else s.google_redirect_uri
-        secrets_file = self.google_client_file(channel_id)
-        state = self.oauth.new("youtube", channel_id, redirect=redirect, secrets=str(secrets_file))
-        url, verifier = youtube.build_auth_url(secrets_file, redirect, state)
-        self.oauth._states[state]["verifier"] = verifier
-        return url
+        return bool(s.webapp_enabled and s.public_base.startswith("https://"))
+
+    def _portal_key(self) -> bytes:
+        s = self.settings
+        base = s.secret_key or s.telegram_bot_token or "storyforge"
+        return hashlib.sha256(f"portal:{base}".encode()).digest()
+
+    def _portal_sig(self, payload: str) -> str:
+        return hmac.new(self._portal_key(), payload.encode(), hashlib.sha256).hexdigest()[:32]
+
+    def portal_token(self, channel_id: int, ttl: int = PORTAL_TTL) -> str:
+        payload = f"{channel_id}.{int(time.time()) + ttl}"
+        return f"{payload}.{self._portal_sig(payload)}"
+
+    def verify_portal_token(self, token: str) -> tuple[int, int] | None:
+        """Retourne (chaîne, expiration) si le lien est authentique et encore valable."""
+        try:
+            cid, exp, sig = token.split(".")
+            if not hmac.compare_digest(sig, self._portal_sig(f"{cid}.{exp}")) or int(exp) < time.time():
+                return None
+            return int(cid), int(exp)
+        except ValueError:
+            return None
+
+    def portal_link(self, channel_id: int) -> str:
+        return f"{self.settings.public_base}/connect/{self.portal_token(channel_id)}"
 
     def google_client_file(self, channel_id: int) -> Path:
         """Client OAuth propre à la chaîne s'il existe (répartit le quota YouTube), sinon le global."""
@@ -323,15 +355,53 @@ class Services:
         specific = default.with_name(f"{default.stem}_{channel_id}{default.suffix}")
         return specific if specific.exists() else default
 
-    def tiktok_auth_url(self, channel_id: int) -> str:
-        s = self.settings
-        state = self.oauth.new("tiktok", channel_id, redirect=s.tiktok_redirect_uri)
-        return tiktok.build_auth_url(s.tiktok_client_key, s.tiktok_redirect_uri, state)
+    def youtube_redirect_uri(self, channel_id: int) -> str:
+        # Un client Google de type « Application Web » peut revenir directement sur notre serveur.
+        if self.portal_available() and youtube.client_type(self.google_client_file(channel_id)) == "web":
+            return f"{self.settings.public_base}/oauth/youtube"
+        return self.settings.google_redirect_uri
 
-    async def complete_oauth(self, state: str, code: str) -> tuple[str, Channel, str]:
+    def tiktok_redirect_uri(self) -> str:
+        s = self.settings
+        if s.tiktok_redirect_uri:
+            return s.tiktok_redirect_uri
+        return f"{s.public_base}/oauth/tiktok" if self.portal_available() else ""
+
+    def oauth_is_automatic(self, platform: str, channel_id: int) -> bool:
+        """Vrai si la plateforme renvoie directement vers notre serveur (sinon : coller l'adresse)."""
+        redirect = self.youtube_redirect_uri(channel_id) if platform == "youtube" else self.tiktok_redirect_uri()
+        return self.portal_available() and redirect.startswith(f"{self.settings.public_base}/oauth/")
+
+    def platform_problem(self, platform: str, channel_id: int) -> str | None:
+        """Message expliquant ce qui manque pour connecter cette plateforme, ou None."""
+        s = self.settings
+        if platform == "youtube":
+            if not self.google_client_file(channel_id).exists():
+                return f"Le fichier OAuth Google {s.google_client_secrets_file} est introuvable sur le serveur."
+            return None
+        if not (s.tiktok_client_key and s.tiktok_client_secret):
+            return "TIKTOK_CLIENT_KEY et TIKTOK_CLIENT_SECRET ne sont pas renseignés dans le .env."
+        if not self.tiktok_redirect_uri():
+            return "TIKTOK_REDIRECT_URI n'est pas renseigné dans le .env."
+        return None
+
+    def youtube_auth_url(self, channel_id: int, portal: str = "") -> str:
+        redirect = self.youtube_redirect_uri(channel_id)
+        secrets_file = self.google_client_file(channel_id)
+        state = self.oauth.new("youtube", channel_id, redirect=redirect, secrets=str(secrets_file), portal=portal)
+        url, verifier = youtube.build_auth_url(secrets_file, redirect, state)
+        self.oauth._states[state]["verifier"] = verifier
+        return url
+
+    def tiktok_auth_url(self, channel_id: int, portal: str = "") -> str:
+        redirect = self.tiktok_redirect_uri()
+        state = self.oauth.new("tiktok", channel_id, redirect=redirect, portal=portal)
+        return tiktok.build_auth_url(self.settings.tiktok_client_key, redirect, state)
+
+    async def complete_oauth(self, state: str, code: str) -> OAuthResult:
         info = self.oauth.pop(state)
         if not info:
-            raise PublisherError("Lien d'autorisation expiré ou inconnu : relance la liaison depuis le dashboard")
+            raise PublisherError("Lien d'autorisation expiré ou inconnu : relance la connexion")
         platform, channel_id = info["platform"], info["channel_id"]
         s = self.settings
         if platform == "youtube":
@@ -341,22 +411,23 @@ class Services:
                 account, creds = await youtube.channel_title(creds)
             except Exception as exc:
                 log.warning("Titre de chaîne YouTube indisponible: %s", exc)
-                account = "compte Google lié"
+                account = "compte Google"
             ch = await self.update_channel(channel_id, youtube_credentials=creds, youtube_account=account)
         else:
             creds = await tiktok.exchange_code(s.tiktok_client_key, s.tiktok_client_secret, info["redirect"], code)
             try:
                 user = await tiktok.user_info(creds["access_token"])
-                account = user.get("display_name") or "compte TikTok lié"
+                account = user.get("display_name") or "compte TikTok"
             except Exception as exc:
                 log.warning("Infos TikTok indisponibles: %s", exc)
-                account = "compte TikTok lié"
+                account = "compte TikTok"
             ch = await self.update_channel(channel_id, tiktok_credentials=creds, tiktok_account=account)
-        await db.log_event(f"{ch.name} : {'YouTube' if platform == 'youtube' else 'TikTok'} lié ({account})", "success", channel_id)
-        return platform, ch, account
+        label = "YouTube" if platform == "youtube" else "TikTok"
+        await db.log_event(f"{ch.name} : {label} connecté ({account})", "success", channel_id)
+        return OAuthResult(platform, ch, account, info.get("portal", ""))
 
-    async def complete_oauth_from_url(self, pasted: str) -> tuple[str, Channel, str]:
-        """L'utilisateur colle l'URL de redirection (contenant ?code=...&state=...)."""
+    async def complete_oauth_from_url(self, pasted: str) -> OAuthResult:
+        """L'utilisateur colle l'adresse de retour (contenant ?code=...&state=...)."""
         parsed = urllib.parse.urlparse(pasted.strip())
         q = urllib.parse.parse_qs(parsed.query)
         if "error" in q:
@@ -364,8 +435,15 @@ class Services:
         code = (q.get("code") or [""])[0]
         state = (q.get("state") or [""])[0]
         if not code or not state:
-            raise PublisherError("URL invalide : elle doit contenir code= et state=")
+            raise PublisherError("Adresse invalide : elle doit contenir code= et state=")
         return await self.complete_oauth(state, code)
+
+    async def unlink(self, channel_id: int, platform: str) -> Channel:
+        fields = ({"youtube_credentials": None, "youtube_account": ""} if platform == "youtube"
+                  else {"tiktok_credentials": None, "tiktok_account": ""})
+        ch = await self.update_channel(channel_id, **fields)
+        await db.log_event(f"{ch.name} : {'YouTube' if platform == 'youtube' else 'TikTok'} déconnecté", "info", channel_id)
+        return ch
 
     # ------------------------------------------------------------------ quotas
     async def elevenlabs_quota(self) -> dict | None:

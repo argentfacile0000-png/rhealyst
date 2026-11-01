@@ -193,16 +193,54 @@ async def channel_view(svc: Services, cid: int) -> Screen:
         _, label = VIDEO_STATUS.get(last.status, ("", last.status))
         lines.append(muted(f"Dernière : « {short(last.title, 40)} », {label.lower()}, {human_delta(last.created_at, zone)}"))
     if not ch.platforms():
-        lines += ["", muted("Lie YouTube ou TikTok pour publier automatiquement.")]
+        lines += ["", muted("Connecte YouTube ou TikTok dans Comptes pour publier automatiquement.")]
 
     rows = [
         [("Mettre en pause" if ch.active else "Activer", f"ct:{cid}"), ("Générer", f"cg:{cid}")],
         [("Réglages", f"ce:{cid}"), ("Vidéos", f"cvv:{cid}:0")],
-        [(f"YouTube {CHECK}" if ch.youtube_linked else "Lier YouTube", f"cy:{cid}"),
-         (f"TikTok {CHECK}" if ch.tiktok_linked else "Lier TikTok", f"ck:{cid}")],
-        [("Publier la suivante", f"cp:{cid}"), ("Supprimer", f"cd:{cid}")],
+        [("Comptes", f"ca:{cid}"), ("Publier la suivante", f"cp:{cid}")],
+        [("Supprimer", f"cd:{cid}")],
         nav("cl", "← Chaînes"),
     ]
+    return "\n".join(lines), kb(rows)
+
+
+async def accounts(svc: Services, cid: int) -> Screen:
+    ch = await svc.get_channel(cid)
+    if ch is None:
+        return "Chaîne introuvable.", kb([nav("cl")])
+
+    def state(platform: str, linked: bool, account: str, enabled: bool) -> str:
+        if linked:
+            return f"{CHECK} <b>{esc(account or 'connecté')}</b>" + ("" if enabled else "  " + muted("publication désactivée"))
+        problem = svc.platform_problem(platform, cid)
+        return muted("à configurer sur le serveur" if problem else "non connecté")
+
+    lines = [
+        title("Comptes", ch.name),
+        "",
+        f"YouTube  {state('youtube', ch.youtube_linked, ch.youtube_account, ch.youtube_enabled)}",
+        f"TikTok  {state('tiktok', ch.tiktok_linked, ch.tiktok_account, ch.tiktok_enabled)}",
+        "",
+    ]
+    rows: list[list] = []
+    if svc.portal_available():
+        lines.append("Ouvre la page de connexion, puis choisis « Se connecter avec YouTube » ou "
+                     "« Se connecter avec TikTok » et accepte les autorisations.")
+        lines.append(muted("Le lien est personnel et expire dans 30 minutes."))
+        rows.append([("Ouvrir la page de connexion", svc.portal_link(cid))])
+    else:
+        lines.append("Choisis la plateforme à connecter. Après l'autorisation, colle ici l'adresse de la page de retour.")
+        lines.append(muted("Pour une connexion en un clic, configure PUBLIC_URL et WEBAPP_ENABLED (voir le README)."))
+        rows.append([("Connecter YouTube", f"cy:{cid}"), ("Connecter TikTok", f"ck:{cid}")])
+    unlink = []
+    if ch.youtube_linked:
+        unlink.append(("Déconnecter YouTube", f"cu:{cid}:youtube"))
+    if ch.tiktok_linked:
+        unlink.append(("Déconnecter TikTok", f"cu:{cid}:tiktok"))
+    if unlink:
+        rows.append(unlink)
+    rows.append([("← Chaîne", f"cv:{cid}"), (HOME, "h")])
     return "\n".join(lines), kb(rows)
 
 

@@ -63,8 +63,11 @@ class Settings(BaseSettings):
     webapp_enabled: bool = False
     webapp_host: str = "0.0.0.0"
     webapp_port: int = 8080
-    # URL publique HTTPS (ex: https://studio.mondomaine.com) — requise pour la Mini App.
+    # URL publique HTTPS (ex: https://studio.mondomaine.com) — requise pour la Mini App
+    # et la page de connexion des comptes YouTube / TikTok.
     public_url: str = ""
+    # Clé de signature des liens de connexion (par défaut dérivée du token Telegram).
+    secret_key: str = ""
 
     # ------------------------------------------------------------------------
     @property

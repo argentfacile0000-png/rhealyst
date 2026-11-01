@@ -1,4 +1,4 @@
-"""Serveur web : Telegram Mini App (dashboard visuel) + retours OAuth."""
+"""Serveur web : Telegram Mini App, page de connexion des comptes et retours OAuth."""
 
 from __future__ import annotations
 
@@ -6,14 +6,16 @@ import html
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qs, quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
 
 from .. import db
 from ..models import Video, VideoStatus
 from ..stats import overview
+from . import pages
 from .auth import validate_init_data
 
 if TYPE_CHECKING:
@@ -21,17 +23,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "static"
-
-
-def _page(title: str, body: str, ok: bool = True) -> HTMLResponse:
-    color = "#22c55e" if ok else "#ef4444"
-    return HTMLResponse(f"""<!doctype html><html lang="fr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title>
-<style>body{{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b14;color:#f4f4f8;
-font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}}.c{{max-width:420px;padding:32px;border-radius:24px;
-background:linear-gradient(160deg,#1a1a2e,#12121c);border:1px solid #2a2a40;text-align:center}}
-h1{{font-size:22px;color:{color}}}p{{color:#a0a0b8;line-height:1.5}}</style></head>
-<body><div class="c"><h1>{html.escape(title)}</h1><p>{body}</p></div></body></html>""")
 
 
 def create_app(svc: Services) -> FastAPI:
@@ -146,18 +137,119 @@ def create_app(svc: Services) -> FastAPI:
             raise HTTPException(404)
         return FileResponse(path, media_type="video/mp4")
 
-    @app.get("/oauth/youtube")
-    async def oauth_youtube(request: Request) -> HTMLResponse:
+    # ------------------------------------------------------------------ connexion des comptes
+    def tg_url() -> str:
+        return f"https://t.me/{svc.bot_username}" if svc.bot_username else ""
+
+    def portal_url(token: str) -> str:
+        return f"/connect/{token}" if token and svc.verify_portal_token(token) else ""
+
+    async def portal_context(token: str):
+        checked = svc.verify_portal_token(token)
+        if not checked:
+            return None
+        ch = await svc.get_channel(checked[0])
+        return (ch, checked[1]) if ch else None
+
+    async def connected(res) -> None:
+        label = "YouTube" if res.platform == "youtube" else "TikTok"
+        await svc.notifier.notify(
+            f"<b>{label} connecté</b> · {html.escape(res.channel.name)}\n\nCompte : {html.escape(res.account)}",
+            "success", res.channel.id,
+        )
+
+    @app.post("/api/channels/{cid}/connect-link")
+    async def api_connect_link(cid: int, u: dict = Depends(user)) -> dict:
+        if not svc.portal_available():
+            raise HTTPException(400, "Page de connexion indisponible : configure WEBAPP_ENABLED et PUBLIC_URL (https)")
+        if await svc.get_channel(cid) is None:
+            raise HTTPException(404, "Chaîne introuvable")
+        return {"url": svc.portal_link(cid)}
+
+    @app.get("/connect/{token}")
+    async def connect_portal(token: str, request: Request) -> HTMLResponse:
+        ctx = await portal_context(token)
+        if not ctx:
+            return pages.expired(tg_url())
+        ch, exp = ctx
+        flash = None
         q = request.query_params
-        if q.get("error"):
-            return _page("Autorisation refusée", html.escape(q["error"]), ok=False)
+        if q.get("done"):
+            name = "YouTube" if q["done"] == "youtube" else "TikTok"
+            flash = ("success", f"{name} est connecté.")
+        elif q.get("off"):
+            name = "YouTube" if q["off"] == "youtube" else "TikTok"
+            flash = ("info", f"{name} est déconnecté.")
+        elif q.get("error"):
+            flash = ("error", html.escape(q["error"][:300]))
+        return pages.portal(
+            ch, token, exp,
+            problems={p: svc.platform_problem(p, ch.id) for p in ("youtube", "tiktok")},
+            automatic={p: svc.oauth_is_automatic(p, ch.id) for p in ("youtube", "tiktok")},
+            flash=flash, tz=settings.timezone,
+        )
+
+    @app.get("/connect/{token}/{platform}")
+    async def connect_start(token: str, platform: str) -> Response:
+        ctx = await portal_context(token)
+        if not ctx or platform not in ("youtube", "tiktok"):
+            return pages.expired(tg_url())
+        ch, _ = ctx
+        problem = svc.platform_problem(platform, ch.id)
+        if problem:
+            return RedirectResponse(f"/connect/{token}?error={quote(problem)}", status_code=303)
         try:
-            platform, ch, account = await svc.complete_oauth(q.get("state", ""), q.get("code", ""))
+            url = svc.youtube_auth_url(ch.id, portal=token) if platform == "youtube" else svc.tiktok_auth_url(ch.id, portal=token)
         except Exception as exc:
-            return _page("Échec de la liaison", html.escape(str(exc)), ok=False)
-        await svc.notifier.notify(f"<b>YouTube lié</b> · {html.escape(ch.name)}\n\nCompte : {html.escape(account)}", "success", ch.id)
-        return _page("Compte lié", f"La chaîne <b>{html.escape(ch.name)}</b> publiera sur <b>{html.escape(account)}</b>."
-                     "<br>Tu peux fermer cette page et revenir sur Telegram.")
+            return RedirectResponse(f"/connect/{token}?error={quote(str(exc))}", status_code=303)
+        return RedirectResponse(url, status_code=303)
+
+    @app.post("/connect/{token}/{platform}/paste")
+    async def connect_paste(token: str, platform: str, request: Request) -> Response:
+        if not await portal_context(token):
+            return pages.expired(tg_url())
+        form = parse_qs((await request.body()).decode("utf-8", "replace"))
+        try:
+            res = await svc.complete_oauth_from_url((form.get("url") or [""])[0])
+        except Exception as exc:
+            return RedirectResponse(f"/connect/{token}?error={quote(str(exc))}", status_code=303)
+        await connected(res)
+        return RedirectResponse(f"/connect/{token}?done={res.platform}", status_code=303)
+
+    @app.post("/connect/{token}/{platform}/disconnect")
+    async def connect_disconnect(token: str, platform: str) -> Response:
+        ctx = await portal_context(token)
+        if not ctx or platform not in ("youtube", "tiktok"):
+            return pages.expired(tg_url())
+        await svc.unlink(ctx[0].id, platform)
+        return RedirectResponse(f"/connect/{token}?off={platform}", status_code=303)
+
+    @app.get("/oauth/{platform}")
+    async def oauth_callback(platform: str, request: Request) -> HTMLResponse:
+        q = request.query_params
+        if platform not in ("youtube", "tiktok"):
+            raise HTTPException(404)
+        name = "YouTube" if platform == "youtube" else "TikTok"
+        if q.get("error"):
+            info = svc.oauth.pop(q.get("state", ""))
+            reasons = {"access_denied": "l'accès a été refusé sur la page d'autorisation",
+                       "invalid_scope": "les autorisations demandées ne sont pas activées dans l'app"}
+            reason = reasons.get(q["error"]) or q.get("error_description") or q["error"]
+            return pages.result(ok=False, heading="Autorisation refusée",
+                                message=f"{name} n'a pas donné l'accès : {html.escape(reason)}.",
+                                portal_url=portal_url(info.get("portal", "") if info else ""), telegram_url=tg_url())
+        try:
+            res = await svc.complete_oauth(q.get("state", ""), q.get("code", ""))
+        except Exception as exc:
+            return pages.result(ok=False, heading="Connexion impossible", message=html.escape(str(exc)),
+                                telegram_url=tg_url())
+        await connected(res)
+        return pages.result(
+            ok=True, heading=f"{name} connecté",
+            message=f"La chaîne <b>{html.escape(res.channel.name)}</b> publiera sur "
+                    f"<b>{html.escape(res.account)}</b>. Tu peux fermer cette page.",
+            portal_url=portal_url(res.portal), telegram_url=tg_url(),
+        )
 
     return app
 

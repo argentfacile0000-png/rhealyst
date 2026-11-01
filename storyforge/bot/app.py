@@ -59,6 +59,7 @@ async def announce(app: Application, svc: Services) -> None:
         await app.bot.set_my_commands([BotCommand(c, d) for c, d in COMMANDS])
     except TelegramError as exc:
         log.warning("set_my_commands: %s", exc)
+    svc.bot_username = app.bot.username or ""
     url = svc.settings.webapp_url
     for admin in svc.settings.admin_ids:
         try:

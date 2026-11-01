@@ -126,14 +126,36 @@ python -m storyforge story --lang fr --format askreddit --parts 2 --seconds 80
 
 ## Configuration des plateformes
 
+### Connexion des comptes
+
+Chaque chaîne a sa page **Comptes** (bot : chaîne → Comptes ; Mini App : bouton Comptes). Elle ouvre une
+**page de connexion** : tu cliques sur « Se connecter avec YouTube » ou « Se connecter avec TikTok », tu choisis
+ton compte et tu acceptes les autorisations chez Google ou TikTok, puis tu reviens sur une page de confirmation.
+Le bot te prévient. On peut changer de compte ou déconnecter depuis la même page.
+
+Le lien est signé, propre à la chaîne et valable 30 minutes. Pour que la page soit joignable depuis ton téléphone,
+le serveur doit avoir une **URL publique HTTPS** :
+
+```env
+WEBAPP_ENABLED=true
+PUBLIC_URL=https://studio.mondomaine.com
+```
+
+Pour obtenir cette URL : un nom de domaine avec Caddy ou Nginx devant le port `8080`, un tunnel Cloudflare nommé,
+ou un domaine statique gratuit ngrok. Sans URL publique, le bot propose l'ancienne méthode : tu autorises,
+puis tu colles dans Telegram l'adresse de la page de retour.
+
 ### YouTube Shorts
 
-1. [Google Cloud Console](https://console.cloud.google.com/) → nouveau projet → activer **YouTube Data API v3**.
-2. Écran de consentement OAuth (type *Externe*), ajoute ton compte Google en *utilisateur test*
-   (ou publie l'application pour éviter l'expiration des jetons au bout de 7 jours).
-3. Identifiants → **ID client OAuth** → type **Application de bureau** → télécharge le JSON
-   → place-le dans `secrets/google_client_secret.json`.
-4. Dans Telegram : chaîne → 🔗 YouTube → autorise → copie l'adresse de la page finale (même si elle affiche une erreur `localhost`) → colle-la dans le chat.
+1. [Google Cloud Console](https://console.cloud.google.com/) : nouveau projet, puis active **YouTube Data API v3**.
+2. Écran de consentement OAuth, type *Externe*. Ajoute ton compte Google en *utilisateur test*
+   (ou publie l'application pour que les accès n'expirent pas au bout de 7 jours).
+3. Identifiants, puis **ID client OAuth** :
+   - avec `PUBLIC_URL` : type **Application Web**, URI de redirection autorisée `https://studio.mondomaine.com/oauth/youtube` ;
+   - sans URL publique : type **Application de bureau**.
+4. Télécharge le JSON et place-le dans `secrets/google_client_secret.json`.
+5. Connecte la chaîne depuis sa page Comptes. Si Google affiche « Application non validée » : Paramètres avancés,
+   puis Accéder à StoryForge (c'est ta propre application).
 
 > **Quota** : un projet Google a 10 000 unités/jour par défaut et un upload coûte environ 1 600 unités, soit ~6 vidéos/jour
 > **par projet**. Pour publier plus : demande une augmentation de quota, ou crée un projet par chaîne et dépose son
@@ -143,30 +165,22 @@ Les vidéos sont déclarées comme contenant des médias synthétiques (`contain
 
 ### TikTok
 
-1. [developers.tiktok.com](https://developers.tiktok.com/) → crée une app → ajoute **Login Kit** et **Content Posting API**
+1. [developers.tiktok.com](https://developers.tiktok.com/) : crée une app, ajoute **Login Kit** et **Content Posting API**
    (scopes `user.info.basic`, `video.upload`, `video.publish`).
-2. Déclare une **Redirect URI** en `https://…` (n'importe quelle page à toi) → renseigne `TIKTOK_CLIENT_KEY`,
-   `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI`.
-3. Dans Telegram : chaîne → 🔗 TikTok → autorise → colle l'adresse de la page de redirection.
-4. Optionnel : réglage « @ TikTok » de la chaîne pour que les liens des vidéos soient corrects.
+2. Déclare la **Redirect URI** `https://studio.mondomaine.com/oauth/tiktok`.
+   Renseigne `TIKTOK_CLIENT_KEY` et `TIKTOK_CLIENT_SECRET` ; `TIKTOK_REDIRECT_URI` peut rester vide avec `PUBLIC_URL`.
+3. Connecte le compte depuis la page Comptes de la chaîne.
+4. Optionnel : réglage « Pseudo TikTok » de la chaîne, pour que les liens des vidéos soient corrects.
 
 > **Important** : tant que ton app TikTok n'a pas passé l'audit de TikTok, la publication directe n'est autorisée
-> qu'en **privé** (`SELF_ONLY`). Deux solutions : faire auditer l'app, ou passer la chaîne en mode **📥 Brouillon** :
+> qu'en **privé** (`SELF_ONLY`). Deux solutions : faire auditer l'app, ou passer la chaîne en mode **Brouillon** :
 > la vidéo arrive dans ta boîte de réception TikTok et tu la publies en un tap (pratique aussi pour ajouter un son tendance).
 > Les vidéos sont marquées « contenu généré par IA » (`is_aigc`).
 
 ### Mini App (dashboard visuel)
 
-Il faut une URL publique **HTTPS** vers le port `WEBAPP_PORT` (reverse proxy Caddy/Nginx, Cloudflare Tunnel…) :
-
-```env
-WEBAPP_ENABLED=true
-PUBLIC_URL=https://studio.mondomaine.com
-```
-
-Au démarrage, le bouton **Dashboard** apparaît dans le menu du bot. Les requêtes sont authentifiées par la signature
-Telegram (`initData`) et réservées aux admins. Avec `PUBLIC_URL`, la liaison YouTube se fait aussi automatiquement
-(ajoute `https://…/oauth/youtube` aux URI de redirection autorisées du client OAuth, type *Application Web*).
+Avec la même configuration (`WEBAPP_ENABLED` et `PUBLIC_URL`), le bouton **Dashboard** apparaît dans le menu du bot.
+Les requêtes sont authentifiées par la signature Telegram (`initData`) et réservées aux admins.
 
 ---
 
@@ -175,7 +189,7 @@ Telegram (`initData`) et réservées aux admins. Avec `PUBLIC_URL`, la liaison Y
 1. **🎞 Banque vidéos** : dépose des vidéos dans `data/backgrounds/<catégorie>/` (cooking, minecraft, satisfying…).
    Privilégie des vidéos longues (20-60 min) et **dont tu as les droits**. Musique optionnelle dans `data/music/`.
 2. **➕ Nouvelle chaîne** : nom → langue → formats, voix, durée, parties…
-3. **🔗 Lier** YouTube et/ou TikTok (chaque chaîne a ses propres comptes : c'est ce qui permet le multi-instances).
+3. **Comptes** : connecte YouTube et/ou TikTok (chaque chaîne a ses propres comptes : c'est ce qui permet le multi-instances).
 4. **▶️ Activer** : la chaîne fabrique sa **réserve** de vidéos d'avance, puis publie à chaque **créneau**
    (avec une variation aléatoire de quelques minutes pour un rythme naturel).
 5. Avec **validation manuelle** ON, rien ne part sans ton ✅ ; OFF, tout est 100 % automatique.

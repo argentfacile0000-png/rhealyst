@@ -254,6 +254,7 @@ const ICONS = {
   trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
 };
 const icon = (name, cls = "w-4 h-4") =>
   `<svg class="${cls}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
@@ -475,9 +476,10 @@ function render(d) {
           <span class="track"></span><span class="thumb"></span>
         </label>
       </div>
-      <div class="flex gap-2 mt-4">
+      <div class="flex flex-wrap gap-2 mt-4">
         <button type="button" class="${BTN_SECONDARY}" data-act="/api/channels/${c.id}/generate" data-msg="Génération lancée — suivi dans Telegram">${icon("zap")}Générer</button>
-        <button type="button" class="${BTN_SECONDARY}" data-act="/api/channels/${c.id}/publish-next" data-msg="Publication lancée">${icon("send")}Publier la suivante</button>
+        <button type="button" class="${BTN_SECONDARY}" data-act="/api/channels/${c.id}/publish-next" data-msg="Publication lancée">${icon("send")}Publier</button>
+        <button type="button" class="${BTN_SECONDARY}" data-connect="${c.id}">${icon("link")}Comptes</button>
       </div>
     </article>`;
   }).join("") : `<div class="p-8 text-center"><p class="text-sm text-muted">Aucune chaîne pour l'instant. Crée la première depuis le bot avec /new.</p></div>`;
@@ -539,7 +541,18 @@ function closePlayer() {
   $("modal").classList.remove("flex");
 }
 
+async function openConnect(cid) {
+  haptic();
+  try {
+    const { url } = await api(`/api/channels/${cid}/connect-link`, "POST");
+    // Hors de la WebView : Google refuse les connexions OAuth dans les vues intégrées.
+    if (tg && tg.openLink) tg.openLink(url, { try_instant_view: false }); else window.open(url, "_blank");
+  } catch (e) { toast(e.message); }
+}
+
 document.addEventListener("click", (ev) => {
+  const c = ev.target.closest("[data-connect]");
+  if (c) { openConnect(c.dataset.connect); return; }
   const a = ev.target.closest("[data-act]");
   if (a) { a.disabled = true; act(a.dataset.act, a.dataset.msg); return; }
   const p = ev.target.closest("[data-play]");

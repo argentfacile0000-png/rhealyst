@@ -255,13 +255,13 @@ async def link_account(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: 
                "Crée une app sur developers.tiktok.com (Login Kit + Content Posting API), puis renseigne "
                "<code>TIKTOK_CLIENT_KEY</code>, <code>TIKTOK_CLIENT_SECRET</code> et <code>TIKTOK_REDIRECT_URI</code>.")
         await show(update, context, (f"<b>Configuration manquante</b>\n\n{esc(exc)}\n\n{doc}",
-                                     kb([[("← Chaîne", f"cv:{cid}")]])))
+                                     kb([[("← Comptes", f"ca:{cid}")]])))
         return
     await q.answer()
     name = "YouTube" if platform == "youtube" else "TikTok"
     auto = platform == "youtube" and bool(s.webapp_url)
     steps = [
-        f"<b>Lier {name}</b> · {esc(ch.name)}",
+        f"<b>Connecter {name}</b> · {esc(ch.name)}",
         "",
         f"1. Ouvre le lien et connecte le compte {name} de cette chaîne.",
     ]
@@ -275,8 +275,8 @@ async def link_account(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: 
     linked = ch.youtube_linked if platform == "youtube" else ch.tiktok_linked
     rows = [[(f"Autoriser {name}", url)]]
     if linked:
-        rows.append([(f"Délier {name}", f"cu:{cid}:{platform}")])
-    rows.append(CANCEL)
+        rows.append([(f"Déconnecter {name}", f"cu:{cid}:{platform}")])
+    rows.append([("← Comptes", f"ca:{cid}")])
     context.user_data["await"] = {"kind": "oauth", "cid": cid, "platform": platform}
     await show(update, context, ("\n".join(steps), kb(rows)))
 
@@ -411,12 +411,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await link_account(update, context, cid, "tiktok")
     elif head == "cu":
         platform = parts[2]
-        fields = ({"youtube_credentials": None, "youtube_account": ""} if platform == "youtube"
-                  else {"tiktok_credentials": None, "tiktok_account": ""})
-        await svc.update_channel(cid, **fields)
+        await svc.unlink(cid, platform)
         context.user_data.pop("await", None)
-        await q.answer("Compte délié")
-        await show(update, context, await screens.channel_view(svc, cid))
+        await q.answer(f"{'YouTube' if platform == 'youtube' else 'TikTok'} déconnecté")
+        await show(update, context, await screens.accounts(svc, cid))
+    elif head == "ca":
+        await q.answer()
+        await show(update, context, await screens.accounts(svc, cid))
     elif head == "cd":
         ch = await svc.get_channel(cid)
         await q.answer()
@@ -590,10 +591,11 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await show(update, context, await screens.channel_group(svc, state["cid"], "voice"), new=True)
         elif kind == "oauth":
             info = await msg.reply_text("Vérification de l'autorisation…")
-            platform, ch, account = await svc.complete_oauth_from_url(text)
+            res = await svc.complete_oauth_from_url(text)
             context.user_data.pop("await", None)
-            await info.edit_text(f"✓ {'YouTube' if platform == 'youtube' else 'TikTok'} lié à « {ch.name} » : {account}")
-            await show(update, context, await screens.channel_view(svc, ch.id), new=True)
+            label = "YouTube" if res.platform == "youtube" else "TikTok"
+            await info.edit_text(f"✓ {label} connecté à « {res.channel.name} » : {res.account}")
+            await show(update, context, await screens.accounts(svc, res.channel.id), new=True)
         elif kind == "bg_newcat":
             cat = re.sub(r"[^a-z0-9_-]+", "-", text.lower()).strip("-")[:40]
             if not cat:

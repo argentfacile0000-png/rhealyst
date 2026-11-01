@@ -31,6 +31,19 @@ def _flow(client_secrets_file: Path, redirect_uri: str, code_verifier: str | Non
     )
 
 
+def client_type(client_secrets_file: Path) -> str | None:
+    """« web » ou « installed » (Application de bureau) selon le fichier OAuth Google."""
+    try:
+        data = json.loads(client_secrets_file.read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if "web" in data:
+        return "web"
+    if "installed" in data:
+        return "installed"
+    return None
+
+
 def build_auth_url(client_secrets_file: Path, redirect_uri: str, state: str) -> tuple[str, str | None]:
     """Retourne (url d'autorisation, code_verifier PKCE à conserver)."""
     flow = _flow(client_secrets_file, redirect_uri)
