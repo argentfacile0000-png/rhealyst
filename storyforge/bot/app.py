@@ -67,8 +67,8 @@ async def announce(app: Application, svc: Services) -> None:
     update_note = ""
     if version and await db.kv_get("announced_version") != version["sha"]:
         previous = await db.kv_get("announced_version")
-        update_note = (f"\n\n<b>Mise à jour installée</b> · {version['short']}"
-                       + (f"\n<i>{html.escape(version['message'])}</i>" if version["message"] else ""))
+        heading = f"<b>Mise à jour installée</b> · {version['short']}" if previous else f"Version {version['short']}"
+        update_note = f"\n\n{heading}" + (f"\n<i>{html.escape(version['message'])}</i>" if version["message"] else "")
         if previous:
             await db.log_event(f"Mise à jour installée : {version['short']} {version['message']}".strip(), "success")
         await db.kv_set("announced_version", version["sha"])

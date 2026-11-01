@@ -55,14 +55,17 @@ trap 'rm -rf -- "${tmp:?}"' EXIT
 as_user bash -c "curl -fsSL --max-time 300 'https://codeload.github.com/${REPO}/tar.gz/${latest}' | tar xz -C '$tmp' --strip-components=1"
 [ -f "$tmp/storyforge/__main__.py" ] || { log "Archive incomplète, abandon"; exit 1; }
 
-# Métadonnées de version (affichées et annoncées par le bot)
-info="$(curl -fsS --max-time 20 "https://api.github.com/repos/${REPO}/commits/${latest}" || true)"
-as_user env INFO="$info" SHA="$latest" OUT="$tmp/.version.json" "$APP/.venv/bin/python" - <<'PY' || true
+# Métadonnées de version (affichées et annoncées par le bot) : liste courte, sans le diff
+as_user curl -fsS --max-time 20 -o "$tmp/.commit.json" \
+  "https://api.github.com/repos/${REPO}/commits?sha=${latest}&per_page=1" || true
+as_user env INFO_FILE="$tmp/.commit.json" SHA="$latest" OUT="$tmp/.version.json" "$APP/.venv/bin/python" - <<'PY' || true
 import json, os
 try:
-    c = json.loads(os.environ.get("INFO") or "{}")
-except ValueError:
+    c = json.load(open(os.environ["INFO_FILE"]))
+except (OSError, ValueError):
     c = {}
+if isinstance(c, list):
+    c = c[0] if c else {}
 commit = c.get("commit", {})
 json.dump({
     "sha": os.environ["SHA"],
@@ -70,6 +73,7 @@ json.dump({
     "date": (commit.get("committer") or {}).get("date", ""),
 }, open(os.environ["OUT"], "w"), ensure_ascii=False)
 PY
+as_user rm -f -- "$tmp/.commit.json"
 echo "$latest" | as_user tee "$tmp/.version" >/dev/null
 
 # Dépendances (uv réutilise son cache : quelques secondes si rien n'a changé)
