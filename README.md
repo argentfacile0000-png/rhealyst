@@ -97,6 +97,24 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+### Sur un serveur (AWS Lightsail, VPS Ubuntu)
+
+Connecte-toi au serveur (sur Lightsail : bouton « Se connecter via SSH » de l'instance) puis :
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/argentfacile0000-png/rhealyst/refs/heads/claude/telegram-dashboard-video-automation-92ebn6/deploy/install.sh -o install.sh
+bash install.sh
+```
+
+Le script demande le token Telegram, ton identifiant Telegram, la clé ElevenLabs et la clé OpenAI, puis installe
+ffmpeg, un Python 3.12 isolé et le service `storyforge` (redémarrage automatique). Il ne supprime rien en dehors de
+`~/storyforge` et refuse d'écraser un dossier ou un service qui ne lui appartient pas. Relancer le script met à jour
+le code en gardant la configuration, les vidéos et la base.
+
+- `bash install.sh --https` ajoute une adresse HTTPS gratuite (`<ip>.sslip.io`, via Caddy) pour la page de connexion
+  des comptes et la Mini App. Il faut ensuite ouvrir le port 443 dans le pare-feu Lightsail.
+- Journaux : `sudo journalctl -u storyforge -f`. Configuration : `~/storyforge/.env`.
+
 ### En local
 
 ```bash
