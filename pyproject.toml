@@ -1,0 +1,44 @@
+[project]
+name = "storyforge"
+version = "1.0.0"
+description = "Usine à vidéos 'storytime' automatisées (ChatGPT + ElevenLabs + ffmpeg) pilotée depuis un dashboard Telegram, publication multi-comptes YouTube Shorts & TikTok."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "python-telegram-bot>=21.6,<23",
+    "openai>=1.40",
+    "httpx>=0.27",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "aiosqlite>=0.20",
+    "apscheduler>=3.10,<4",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pillow>=10.0",
+    "google-api-python-client>=2.130",
+    "google-auth>=2.29",
+    "google-auth-oauthlib>=1.2",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+storyforge = "storyforge.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["storyforge*"]
+
+[tool.setuptools.package-data]
+storyforge = ["webapp/static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

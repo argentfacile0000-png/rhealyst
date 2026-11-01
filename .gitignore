@@ -1,67 +1,24 @@
-/myenv
-dashboard/node_modules
-dashboard/.next
+# Secrets & config locale
+.env
+secrets/*
+!secrets/.gitkeep
 
+# Données (vidéos, base, rendus)
+data/
 
-# Ignore Python cache
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Ignore virtual environments
-venv/
-.venv/
-env/
-ENV/
-
-# Ignore IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Ignore OS files
-.DS_Store
-Thumbs.db
-
-# Ignore logs
-*.log
-
-# Ignore build outputs
-dist/
-build/
-
-# Ignore temporary files
-*.tmp
-*.temp
-*.db-journal
-
-# Ignore Python packaging
 *.egg-info/
-.Python
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
 
-# Ignore Jupyter Notebook checkpoints
-.ipynb_checkpoints/
-
-# Ignore environment variables
-.env
-.env.local
-.env.*.local
-
-# Ignore node_modules
-node_modules/
-package-lock.json
-
-# Ignore Next.js build output
-.next/
-out/
-
-# Ignore Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.zip
-*.rar
-
-
+# OS / éditeurs
+.DS_Store
+.idea/
+.vscode/

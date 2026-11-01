@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>StoryForge</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg:#0a0a12;--bg2:#12121e;--card:#161624;--card2:#1d1d2e;--line:#26263a;
+  --text:#f3f3f8;--muted:#9a9ab3;--faint:#6b6b85;
+  --accent:#7c5cff;--accent2:#ff4fa3;--ok:#22c55e;--warn:#f5b524;--err:#ef4444;--info:#38bdf8;
+  --yt:#ff3b3b;--tt:#25f4ee;
+  --radius:20px;--shadow:0 10px 30px rgba(0,0,0,.35);
+}
+:root[data-theme="light"]{
+  --bg:#f4f4fa;--bg2:#ffffff;--card:#ffffff;--card2:#f1f0f8;--line:#e4e3ef;
+  --text:#14141f;--muted:#5d5d78;--faint:#9897ad;--shadow:0 8px 24px rgba(30,20,80,.08);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Inter,sans-serif}
+body{padding:0 0 40px;min-height:100vh;overflow-x:hidden}
+.wrap{max-width:720px;margin:0 auto;padding:0 16px}
+header{position:relative;padding:22px 0 18px;overflow:hidden}
+header::before{content:"";position:absolute;inset:-80px -40px auto;height:260px;z-index:0;
+  background:radial-gradient(closest-side,rgba(124,92,255,.45),transparent 70%),
+             radial-gradient(closest-side at 85% 30%,rgba(255,79,163,.35),transparent 70%);filter:blur(10px)}
+.top{position:relative;z-index:1;display:flex;align-items:center;gap:12px}
+.logo{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:24px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 8px 24px rgba(124,92,255,.45)}
+.brand h1{margin:0;font-size:20px;letter-spacing:.3px}
+.brand small{color:var(--muted);font-size:12.5px}
+.top .sp{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:999px;font-size:12px;font-weight:600;
+  background:var(--card2);border:1px solid var(--line);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(34,197,94,.18)}
+.paused .dot{background:var(--warn);box-shadow:0 0 0 4px rgba(245,181,36,.18)}
+.iconbtn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--card);
+  color:var(--text);font-size:17px;display:grid;place-items:center;cursor:pointer}
+.iconbtn:active{transform:scale(.94)}
+.kpis{position:relative;z-index:1;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:18px}
+@media(min-width:560px){.kpis{grid-template-columns:repeat(4,1fr)}}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow)}
+.kpi .ic{font-size:18px}
+.kpi .v{font-size:28px;font-weight:800;margin-top:6px;letter-spacing:-.5px}
+.kpi .l{font-size:12px;color:var(--muted);margin-top:2px}
+section{margin-top:22px}
+.sh{display:flex;align-items:baseline;justify-content:space-between;margin:0 2px 10px}
+.sh h2{font-size:16px;margin:0}
+.sh span{font-size:12px;color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
+.chart svg{width:100%;height:150px;display:block}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.quota{margin-top:12px}
+.bar{height:10px;border-radius:99px;background:var(--card2);overflow:hidden;border:1px solid var(--line)}
+.bar>div{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.quota .row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:8px}
+.hscroll{display:flex;gap:12px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory}
+.hscroll::-webkit-scrollbar{display:none}
+.appr{flex:0 0 172px;scroll-snap-align:start;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.thumb{position:relative;aspect-ratio:9/16;background:linear-gradient(160deg,#2a2150,#3b1a3a);cursor:pointer}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb .play{position:absolute;inset:0;display:grid;place-items:center;font-size:34px;
+  background:linear-gradient(transparent 55%,rgba(0,0,0,.65))}
+.thumb .dur{position:absolute;right:8px;bottom:8px;font-size:11px;font-weight:700;padding:3px 7px;border-radius:8px;background:rgba(0,0,0,.6);color:#fff}
+.appr .meta{padding:10px}
+.appr .t{font-size:13px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.appr .c{font-size:11.5px;color:var(--muted);margin-top:4px}
+.acts{display:flex;gap:6px;margin-top:10px}
+.btn{flex:1;border:0;border-radius:12px;padding:10px 8px;font-size:13px;font-weight:700;cursor:pointer;color:#fff;
+  background:var(--card2);color:var(--text);border:1px solid var(--line)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));border:0;color:#fff}
+.btn.ok{background:rgba(34,197,94,.15);color:var(--ok);border-color:rgba(34,197,94,.3)}
+.btn.danger{background:rgba(239,68,68,.12);color:var(--err);border-color:rgba(239,68,68,.25)}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.5}
+.ch{display:flex;flex-direction:column;gap:12px}
+.chc{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow)}
+.chc .h{display:flex;align-items:center;gap:10px}
+.chc .name{font-weight:800;font-size:15.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.chip{font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line);color:var(--muted)}
+.chip.yt.on{color:var(--yt);border-color:rgba(255,59,59,.35)}
+.chip.tt.on{color:var(--tt);border-color:rgba(37,244,238,.35)}
+.chip.off{opacity:.55;text-decoration:line-through}
+.switch{position:relative;width:46px;height:28px;flex:0 0 auto}
+.switch input{display:none}
+.switch span{position:absolute;inset:0;border-radius:99px;background:var(--card2);border:1px solid var(--line);transition:.2s;cursor:pointer}
+.switch span::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.switch input:checked+span{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent}
+.switch input:checked+span::after{transform:translateX(18px)}
+.list{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px}
+.row .mini{width:44px;height:78px;border-radius:10px;overflow:hidden;flex:0 0 auto;background:linear-gradient(160deg,#2a2150,#3b1a3a)}
+.row .mini img{width:100%;height:100%;object-fit:cover}
+.row .b{flex:1;min-width:0}
+.row .t{font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .s{font-size:12px;color:var(--muted);margin-top:3px}
+.st{font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;display:inline-block}
+.st.published{background:rgba(34,197,94,.15);color:var(--ok)}
+.st.ready{background:rgba(56,189,248,.15);color:var(--info)}
+.st.pending_approval{background:rgba(245,181,36,.15);color:var(--warn)}
+.st.failed{background:rgba(239,68,68,.15);color:var(--err)}
+.st.rendering,.st.publishing{background:rgba(124,92,255,.18);color:var(--accent)}
+.st.discarded{background:var(--card2);color:var(--faint)}
+.links{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+.links a{font-size:11.5px;font-weight:700;text-decoration:none;padding:3px 8px;border-radius:8px;background:var(--card2);color:var(--text)}
+.job{display:flex;align-items:center;gap:10px;font-size:13px;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:14px}
+.spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.empty{color:var(--muted);font-size:13px;text-align:center;padding:18px;border:1px dashed var(--line);border-radius:16px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);background:var(--card2);color:var(--text);
+  border:1px solid var(--line);padding:12px 16px;border-radius:14px;font-size:13.5px;font-weight:600;box-shadow:var(--shadow);
+  transition:.3s;z-index:20;max-width:90vw}
+.toast.on{transform:translateX(-50%) translateY(0)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;place-items:center;z-index:30;padding:16px}
+.modal.on{display:grid}
+.modal video{max-height:82vh;max-width:100%;border-radius:18px;background:#000}
+.gate{min-height:100vh;display:grid;place-items:center;text-align:center;padding:24px;color:var(--muted)}
+.gate b{color:var(--text);font-size:18px;display:block;margin-bottom:8px}
+.skeleton{opacity:.5}
+</style>
+</head>
+<body>
+<div id="app" class="wrap skeleton">
+  <header>
+    <div class="top">
+      <div class="logo">🎬</div>
+      <div class="brand"><h1>StoryForge</h1><small id="hello">Control Center</small></div>
+      <div class="sp"></div>
+      <span class="pill" id="status"><span class="dot"></span><span id="statusTxt">…</span></span>
+      <button class="iconbtn" id="pauseBtn" title="Pause globale">⏸</button>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="ic">🎥</div><div class="v" id="kGen">–</div><div class="l">générées aujourd'hui</div></div>
+      <div class="kpi"><div class="ic">🚀</div><div class="v" id="kPub">–</div><div class="l" id="kPubL">publiées</div></div>
+      <div class="kpi"><div class="ic">🟡</div><div class="v" id="kAppr">–</div><div class="l">à valider</div></div>
+      <div class="kpi"><div class="ic">❌</div><div class="v" id="kFail">–</div><div class="l">échecs du jour</div></div>
+    </div>
+  </header>
+
+  <section>
+    <div class="sh"><h2>Activité · 14 jours</h2><span id="totals"></span></div>
+    <div class="card chart">
+      <svg id="chart" viewBox="0 0 700 150" preserveAspectRatio="none" aria-label="Publications et générations sur 14 jours"></svg>
+      <div class="legend"><span><i style="background:linear-gradient(135deg,var(--accent),var(--accent2))"></i>Publications</span>
+        <span><i style="background:var(--line)"></i>Vidéos générées</span></div>
+      <div class="quota" id="quota"></div>
+    </div>
+  </section>
+
+  <section id="apprSec">
+    <div class="sh"><h2>À valider</h2><span id="apprCount"></span></div>
+    <div class="hscroll" id="approvals"></div>
+  </section>
+
+  <section>
+    <div class="sh"><h2>Chaînes</h2><span id="chCount"></span></div>
+    <div class="ch" id="channels"></div>
+  </section>
+
+  <section id="jobsSec">
+    <div class="sh"><h2>En cours</h2><span id="jobCount"></span></div>
+    <div class="list" id="jobs"></div>
+  </section>
+
+  <section>
+    <div class="sh"><h2>Dernières vidéos</h2><span></span></div>
+    <div class="list" id="recent"></div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+<div class="modal" id="modal"><video id="player" controls playsinline></video></div>
+
+<script>
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+const INIT = tg ? tg.initData : "";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const STATUS = {rendering:"En fabrication",pending_approval:"À valider",ready:"Prête",publishing:"Publication…",
+  published:"Publiée",failed:"Échec",discarded:"Jetée"};
+const mmss = (s) => `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,"0")}`;
+const media = (kind, id) => `/media/${kind}/${id}?tma=${encodeURIComponent(INIT)}`;
+
+if (tg) {
+  tg.ready(); tg.expand();
+  try { tg.setHeaderColor("secondary_bg_color"); } catch (e) {}
+  document.documentElement.dataset.theme = tg.colorScheme === "light" ? "light" : "dark";
+  tg.onEvent("themeChanged", () => document.documentElement.dataset.theme = tg.colorScheme === "light" ? "light" : "dark");
+}
+
+function haptic(type = "light") { try { tg.HapticFeedback.impactOccurred(type); } catch (e) {} }
+let toastTimer;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2600);
+}
+
+async function api(path, method = "GET") {
+  const r = await fetch(path, {method, headers: {"X-Telegram-Init-Data": INIT}});
+  if (!r.ok) {
+    let msg = r.status === 401 ? "Accès refusé" : `Erreur ${r.status}`;
+    try { msg = (await r.json()).detail || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+async function act(path, okMsg) {
+  haptic("medium");
+  try { await api(path, "POST"); toast(okMsg); try { tg.HapticFeedback.notificationOccurred("success"); } catch (e) {} }
+  catch (e) { toast("⚠️ " + e.message); try { tg.HapticFeedback.notificationOccurred("error"); } catch (x) {} }
+  load();
+}
+
+function chart(series) {
+  const svg = $("chart"), W = 700, H = 150, pad = 18, n = series.labels.length;
+  const max = Math.max(1, ...series.published, ...series.generated);
+  const slot = (W - pad * 2) / n, bw = Math.min(16, slot / 3);
+  let out = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff4fa3"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs>`;
+  for (let i = 0; i < n; i++) {
+    const x = pad + i * slot + slot / 2;
+    const hg = (series.generated[i] / max) * (H - 40), hp = (series.published[i] / max) * (H - 40);
+    out += `<rect x="${x - bw - 1}" y="${H - 22 - hg}" width="${bw}" height="${Math.max(hg, 2)}" rx="4" fill="var(--line)"/>`;
+    out += `<rect x="${x + 1}" y="${H - 22 - hp}" width="${bw}" height="${Math.max(hp, 2)}" rx="4" fill="url(#g)"/>`;
+    if (i % 2 === (n - 1) % 2) out += `<text x="${x}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--faint)">${esc(series.labels[i])}</text>`;
+  }
+  svg.innerHTML = out;
+  const tp = series.published.reduce((a, b) => a + b, 0), tgn = series.generated.reduce((a, b) => a + b, 0);
+  $("totals").textContent = `${tp} publiées · ${tgn} générées`;
+}
+
+function render(d) {
+  $("app").classList.remove("skeleton");
+  if (d.user && d.user.first_name) $("hello").textContent = `Salut ${d.user.first_name} 👋`;
+  $("status").classList.toggle("paused", d.paused);
+  $("statusTxt").textContent = d.paused ? "En pause" : `En ligne · ${d.uptime}`;
+  $("pauseBtn").textContent = d.paused ? "▶️" : "⏸";
+  $("kGen").textContent = d.today.generated;
+  $("kPub").textContent = d.today.published;
+  $("kPubL").textContent = `publiées · YT ${d.today.youtube} · TT ${d.today.tiktok}`;
+  $("kAppr").textContent = d.pending_approval;
+  $("kFail").textContent = d.today.failed;
+  chart(d.series);
+
+  const q = d.quota;
+  $("quota").innerHTML = q && q.limit ? `<div class="row"><span>🔋 ElevenLabs ${esc(q.tier || "")}</span>
+    <span>${(q.limit - q.used).toLocaleString("fr")} car. restants</span></div>
+    <div class="bar"><div style="width:${Math.max(2, 100 - (q.used / q.limit) * 100)}%"></div></div>` : "";
+
+  // Approvals
+  $("apprSec").style.display = d.approvals.length ? "" : "none";
+  $("apprCount").textContent = d.approvals.length ? `${d.approvals.length} en attente` : "";
+  $("approvals").innerHTML = d.approvals.map((v) => `
+    <div class="appr">
+      <div class="thumb" data-play="${v.id}"><img loading="lazy" src="${media("thumb", v.id)}" onerror="this.remove()">
+        <div class="play">▶</div><div class="dur">${mmss(v.duration)}</div></div>
+      <div class="meta"><div class="t">${esc(v.title)}</div>
+        <div class="c">${esc(v.channel)}${v.part ? " · P" + esc(v.part) : ""}</div>
+        <div class="acts">
+          <button class="btn ok" data-act="/api/videos/${v.id}/approve" data-msg="✅ Validée">✅</button>
+          <button class="btn primary" data-act="/api/videos/${v.id}/publish" data-msg="🚀 Publication lancée">🚀</button>
+          <button class="btn danger" data-act="/api/videos/${v.id}/discard" data-msg="🗑 Jetée">🗑</button>
+        </div></div>
+    </div>`).join("");
+
+  // Channels
+  $("chCount").textContent = `${d.channels.filter((c) => c.active).length} actives / ${d.channels.length}`;
+  $("channels").innerHTML = d.channels.length ? d.channels.map((c) => `
+    <div class="chc">
+      <div class="h"><span style="font-size:20px">${esc(c.flag)}</span><div class="name">${esc(c.name)}</div>
+        <label class="switch"><input type="checkbox" ${c.active ? "checked" : ""} data-toggle="${c.id}"><span></span></label></div>
+      <div class="chips">
+        <span class="chip">🟢 ${c.ready} prête${c.ready > 1 ? "s" : ""}</span>
+        ${c.pending ? `<span class="chip">🟡 ${c.pending} à valider</span>` : ""}
+        ${c.rendering ? `<span class="chip">⚙️ ${c.rendering} en cours</span>` : ""}
+        <span class="chip">⏰ ${c.active ? esc(c.next_slot) : "inactive"}</span>
+        <span class="chip">📅 ${c.per_day}/jour</span>
+        <span class="chip yt ${c.youtube.linked && c.youtube.enabled ? "on" : "off"}">▶ YouTube</span>
+        <span class="chip tt ${c.tiktok.linked && c.tiktok.enabled ? "on" : "off"}">♪ TikTok</span>
+      </div>
+      <div class="acts">
+        <button class="btn primary" data-act="/api/channels/${c.id}/generate" data-msg="⚡ Génération lancée — suis-la dans Telegram">⚡ Générer</button>
+        <button class="btn" data-act="/api/channels/${c.id}/publish-next" data-msg="🚀 Publication lancée">🚀 Publier la suivante</button>
+      </div>
+    </div>`).join("") : `<div class="empty">Aucune chaîne. Crée-la depuis le bot avec /new ✨</div>`;
+
+  // Jobs
+  $("jobsSec").style.display = d.jobs.length ? "" : "none";
+  $("jobCount").textContent = d.jobs.length ? `${d.jobs.length} tâche${d.jobs.length > 1 ? "s" : ""}` : "";
+  $("jobs").innerHTML = d.jobs.map((j) => `<div class="job">${j.status === "running" ? '<div class="spin"></div>' : "⏳"}
+      <div style="flex:1">${esc(j.label)}</div><span style="color:var(--muted);font-size:12px">${mmss(j.since)}</span></div>`).join("");
+
+  // Recent
+  $("recent").innerHTML = d.recent.length ? d.recent.map((v) => `
+    <div class="row">
+      <div class="mini" ${v.has_file ? `data-play="${v.id}"` : ""}>${v.has_thumb ? `<img loading="lazy" src="${media("thumb", v.id)}" onerror="this.remove()">` : ""}</div>
+      <div class="b"><div class="t">${esc(v.title)}</div>
+        <div class="s">${esc(v.channel)}${v.part ? " · P" + esc(v.part) : ""} · ${esc(v.created)}</div>
+        <div class="links"><span class="st ${esc(v.status)}">${esc(STATUS[v.status] || v.status)}</span>
+          ${v.pubs.map((p) => p.url ? `<a href="${esc(p.url)}" target="_blank">${p.platform === "youtube" ? "▶ YouTube" : "♪ TikTok"}</a>`
+            : `<span class="st ${p.status === "failed" ? "failed" : "ready"}" title="${esc(p.error)}">${p.platform === "youtube" ? "YT" : "TT"} ${p.status === "failed" ? "✕" : p.status === "draft" ? "brouillon" : "✓"}</span>`).join("")}
+        </div></div>
+    </div>`).join("") : `<div class="empty">Les vidéos générées apparaîtront ici.</div>`;
+}
+
+async function load() {
+  try { render(await api("/api/overview")); }
+  catch (e) { toast("⚠️ " + e.message); }
+}
+
+document.addEventListener("click", (ev) => {
+  const a = ev.target.closest("[data-act]");
+  if (a) { a.disabled = true; act(a.dataset.act, a.dataset.msg); return; }
+  const p = ev.target.closest("[data-play]");
+  if (p) { haptic(); const v = $("player"); v.src = media("video", p.dataset.play); $("modal").classList.add("on"); v.play().catch(() => {}); }
+});
+document.addEventListener("change", (ev) => {
+  const t = ev.target.closest("[data-toggle]");
+  if (t) act(`/api/channels/${t.dataset.toggle}/toggle`, t.checked ? "▶️ Chaîne activée" : "⏸ Chaîne en pause");
+});
+$("modal").addEventListener("click", (e) => { if (e.target.id === "modal") { $("player").pause(); $("modal").classList.remove("on"); } });
+$("pauseBtn").addEventListener("click", () => act("/api/system/pause", "Système mis à jour"));
+
+if (!INIT) {
+  document.body.innerHTML = `<div class="gate"><div><b>🎬 StoryForge</b>Ouvre ce dashboard depuis le bot Telegram (bouton « Dashboard »).</div></div>`;
+} else {
+  load();
+  setInterval(load, 15000);
+}
+</script>
+</body>
+</html>

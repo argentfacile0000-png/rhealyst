@@ -1,413 +1,220 @@
-<div align="center">
+# 🎬 StoryForge
+
+**Usine à vidéos « storytime » automatisées, pilotée depuis un dashboard Telegram.**
+Histoires originales écrites par ChatGPT → voix off ElevenLabs → séquence de fond tirée au hasard
+→ sous-titres mot à mot → publication automatique sur **YouTube Shorts** et **TikTok**,
+avec **plusieurs instances** (chaînes) qui publient chacune sur leurs propres comptes.
 
 ```
-██████╗ ██╗  ██╗███████╗ █████╗ ██╗  ██╗   ██╗███████╗████████╗
-██╔══██╗██║  ██║██╔════╝██╔══██╗██║  ╚██╗ ██╔╝██╔════╝╚══██╔══╝
-██████╔╝███████║█████╗  ███████║██║   ╚████╔╝ ███████╗   ██║   
-██╔══██╗██╔══██║██╔══╝  ██╔══██║██║    ╚██╔╝  ╚════██║   ██║   
-██║  ██║██║  ██║███████╗██║  ██║███████╗██║   ███████║   ██║   
-╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝   ╚══════╝   ╚═╝   
-```
-
-<h3>A feature-rich Discord bot paired with a sleek Next.js dashboard</h3>
-
-<a href="https://nexiohost.in"><img src="https://img.shields.io/badge/⭐%20PREMIUM%20HOSTING-NexioHost-FFD700?style=for-the-badge&labelColor=1a1a2e&color=FFD700&logoColor=FFD700"/></a>
-
-<p>
-  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white"/></a>
-  <a href="https://nextjs.org"><img src="https://img.shields.io/badge/Next.js-14+-000000?style=for-the-badge&logo=nextdotjs&logoColor=white"/></a>
-  <a href="https://fastapi.tiangolo.com"><img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white"/></a>
-  <a href="https://discordpy.readthedocs.io"><img src="https://img.shields.io/badge/Discord.py-v2-5865F2?style=for-the-badge&logo=discord&logoColor=white"/></a>
-</p>
-<p>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-red?style=for-the-badge"/></a>
-  <a href="https://discord.gg/codexdev"><img src="https://img.shields.io/badge/Discord-Join_Server-5865F2?style=for-the-badge&logo=discord&logoColor=white"/></a>
-  <a href="https://youtube.com/@CodeXDevs"><img src="https://img.shields.io/badge/YouTube-CodeXDevs-FF0000?style=for-the-badge&logo=youtube&logoColor=white"/></a>
-  <a href="https://github.com/RayExo"><img src="https://img.shields.io/badge/GitHub-RayExo-181717?style=for-the-badge&logo=github&logoColor=white"/></a>
-</p>
-
-</div>
-
----
-
-## ✦ Overview
-
-Rhealyst is a fully-featured Discord bot with a modern web dashboard for managing everything from antinuke to music. Built on `discord.py v2`, `FastAPI`, and `Next.js 14` with Tailwind CSS.
-
-```
-Rhealyst-CV2-With-Dashboard/
-├── 🤖  bot/                   Python Discord bot + FastAPI backend
-│   ├── api/                   Dashboard REST API (FastAPI)
-│   ├── cogs/                  All bot features (commands, events, antinuke, automod…)
-│   ├── core/                  Bot client, context, cog base
-│   ├── utils/                 Shared utilities (emoji, tools, sync, cloudflare tunnel…)
-│   ├── games/                 Standalone game modules
-│   ├── assets/                Fonts, backgrounds, GIFs
-│   └── CodeX.py               Entry point
-│
-└── 🌐  dashboard/             Next.js frontend
-    ├── app/                   App Router pages & API routes
-    ├── components/            Reusable UI components
-    ├── hooks/                 Custom React hooks
-    ├── lib/                   API helpers & utilities
-    └── types/                 TypeScript type definitions
+ ⏰ Créneau / ⚡ bouton
+        │
+        ▼
+ 🧠 ChatGPT ──► histoire originale (accroche, parties, titre, hashtags)
+        │
+        ▼
+ 🎙 ElevenLabs ──► voix + horodatage de chaque mot ──► silences resserrés, accélération
+        │
+        ▼
+ 🎞 Banque vidéo ──► vidéo de fond au hasard ──► séquence au hasard de la durée exacte
+        │
+        ▼
+ 🎬 ffmpeg ──► 1080×1920 · sous-titres « pop » mot à mot · label PARTIE N · carte d'accroche
+        │
+        ▼
+ ✋ Validation dans Telegram (optionnelle) ──► 🚀 YouTube Shorts + TikTok ──► 🔔 liens dans Telegram
 ```
 
 ---
 
-## ✦ Features
+## La direction artistique reproduite
 
-<table>
-<tr>
-<td width="50%">
+Le projet reprend le **style** des vidéos de référence (pas leurs textes : chaque histoire est inédite) :
 
-**🛡️ Security**
-- Antinuke — ban, kick, channel & role flood, webhook abuse, bot adds, prune
-- Automod — spam, caps, links, invites, mass mentions, emoji spam
-- Anti-member update protection
-- Whitelist / unwhitelist system
-- Emergency lockdown mode
-
-</td>
-<td width="50%">
-
-**🎵 Music**
-- Lavalink v4 powered playback
-- YouTube, SoundCloud, JioSaavn search
-- Queue, loop, autoplay, shuffle
-- Seek, rewind, forward controls
-- Fully configurable via `.env`
-
-</td>
-</tr>
-<tr>
-<td>
-
-**⚙️ Management**
-- Moderation — ban, kick, mute, warn, lock, jail, and more
-- Full logging system
-- Reaction roles, vanity roles, invite tracker
-- Tickets, giveaways, verification
-- Join-to-create voice channels
-
-</td>
-<td>
-
-**🌐 Dashboard**
-- Discord OAuth2 login
-- Per-server settings management
-- Live bot stats & metrics
-- Fully branded & customisable
-- HTTPS via Cloudflare Tunnel (permanent URL)
-- Deploys to Vercel in minutes
-
-</td>
-</tr>
-<tr>
-<td>
-
-**🎉 Engagement**
-- Leveling & XP system with leaderboard
-- Birthday tracker
-- 12+ mini-games (chess, battleship, wordle, 2048…)
-- AFK system, autorole, autoresponder, sticky messages
-- Counting, blackjack, slots, booster perks
-
-</td>
-<td>
-
-**🔧 Developer**
-- Application emoji auto-sync on startup
-- Jishaku eval support
-- Slash + prefix commands
-- FastAPI backend with API key auth + rate limiting
-- Cloudflare Tunnel — unlimited bandwidth, permanent URL, zero system installs
-- CodeX Devs watermark on every source file
-
-</td>
-</tr>
-</table>
-
----
-
-## ✦ Prerequisites
-
-| Requirement | Version / Notes |
-|---|---|
-| Python | 3.10 or higher |
-| Node.js | 18 or higher |
-| Lavalink node | v4 |
-| Discord bot token | — |
-| Discord OAuth app | for dashboard login |
-| Cloudflare account (free) | for HTTPS tunnel |
-
----
-
-## ✦ Bot Setup
-
-**1 — Clone the repo**
-
-```bash
-git clone https://github.com/RayExo/Rhealyst-CV2-With-Dashboard
-cd Rhealyst-CV2-With-Dashboard/bot
-```
-
-**2 — Install dependencies**
-
-```bash
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# Linux / macOS
-source .venv/bin/activate
-
-pip install -r requirements.txt
-```
-
-**3 — Configure the environment**
-
-Copy `.env.example` to `.env` and fill in the values:
-
-```env
-# ── Core ──────────────────────────────────────────────────────────
-TOKEN              = your_discord_bot_token
-brand_name         = 'Rhealyst'
-
-# ── Owner IDs (comma-separated) ───────────────────────────────────
-OWNER_IDS          = 870179991462236170,767979794411028491
-
-# ── Lavalink ──────────────────────────────────────────────────────
-LAVALINK_HOST      = "your-lavalink-host"
-LAVALINK_PASSWORD  = "your_password"
-LAVALINK_SECURE    = "true"
-LAVALINK_PORT      = ""
-
-# ── Emoji Sync ────────────────────────────────────────────────────
-EMOJI_SYNC         = "true"
-
-# ── API / Dashboard Backend ───────────────────────────────────────
-API_ENABLED        = "true"
-API_PORT           = "8000"
-DASHBOARD_API_KEY  = "change_this_to_a_strong_secret"
-CORS_ORIGINS       = ""
-
-# ── Cloudflare Tunnel ─────────────────────────────────────────────
-TUNNEL_ENABLED     = "true"
-CF_TUNNEL_TOKEN    = "your_tunnel_token"
-CF_TUNNEL_URL      = "https://api.yourdomain.com"
-
-# ── Webhooks ──────────────────────────────────────────────────────
-WEBHOOK_URL        = "https://discord.com/api/webhooks/..."
-```
-
-**4 — Run the bot**
-
-```bash
-python CodeX.py
-```
-
----
-
-## ✦ Dashboard Setup
-
-**1 — Install dependencies**
-
-```bash
-cd dashboard
-npm install
-```
-
-**2 — Configure the environment**
-
-Copy `.env.example` to `.env.local`:
-
-```env
-NEXT_PUBLIC_API_URL           = https://api.yourdomain.com/api/v1
-NEXT_PUBLIC_DASHBOARD_API_KEY = your_shared_api_key
-
-NEXTAUTH_URL                  = http://localhost:3000
-NEXTAUTH_SECRET               = a_long_random_string
-
-DISCORD_CLIENT_ID             = your_discord_oauth_client_id
-DISCORD_CLIENT_SECRET         = your_discord_oauth_client_secret
-
-NEXT_PUBLIC_ADMIN_IDS         = your_discord_user_id
-NEXT_PUBLIC_BRAND_NAME        = "Rhealyst"
-NEXT_PUBLIC_BRAND_NAME_WORD   = "ZX"
-```
-
-**3 — Run locally**
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000)
-
----
-
-## ✦ Environment Reference
-
-### Bot — `bot/.env`
-
-| Variable | Default | Description |
+| Élément | Ce que font les vidéos de référence | Ce que fait StoryForge |
 |---|---|---|
-| `TOKEN` | — | Discord bot token |
-| `OWNER_IDS` | — | Comma-separated owner Discord user IDs |
-| `LAVALINK_HOST` | — | Lavalink server hostname (no protocol) |
-| `LAVALINK_PASSWORD` | — | Lavalink password |
-| `LAVALINK_SECURE` | `true` | `true` = HTTPS, `false` = HTTP |
-| `LAVALINK_PORT` | _(empty)_ | Port — only needed when `LAVALINK_SECURE=false` |
-| `EMOJI_SYNC` | `true` | Run application emoji sync on startup |
-| `API_ENABLED` | `true` | Start the FastAPI dashboard backend |
-| `API_PORT` | `8000` | Port the backend listens on |
-| `DASHBOARD_API_KEY` | — | Shared secret between bot API and dashboard |
-| `CORS_ORIGINS` | _(empty)_ | Extra CORS-allowed origins, comma-separated |
-| `WEBHOOK_URL` | — | Discord webhook for command logs |
-| `TUNNEL_ENABLED` | `true` | Expose the API over HTTPS via Cloudflare Tunnel |
-| `CF_TUNNEL_TOKEN` | — | Token from Cloudflare Zero Trust dashboard |
-| `CF_TUNNEL_URL` | — | Your permanent public URL (e.g. `https://api.yourdomain.com`) |
+| Format | Storytime façon Reddit, à la 1ʳᵉ personne | 12 formats : question Reddit, trahison & drama, vengeance, « ai-je tort ? », karma, boulot, famille… |
+| Accroche | 1ʳᵉ phrase = titre-confession choc ou question lue à voix haute | Imposée par le prompt, avec boucle ouverte |
+| Écriture | Détails ultra précis (« un latte à 7 $ »), phrases courtes, comparaisons exagérées, escalade | Règles détaillées dans le prompt + « ADN » aléatoire (narrateur, lieu, personnage, twist) pour ne jamais se répéter |
+| Rythme | ~5 mots/s, quasiment aucun blanc | Vitesse ElevenLabs 1,1× + accélération 1,2× + **silences raccourcis à 0,22 s** |
+| Sous-titres | 1 mot à la fois, blanc épais contour noir, au centre | Police Montserrat ExtraBold, effet « pop », ou mode 3 mots surlignés |
+| Séries | « PART 1 » en bleu en haut, coupure en plein suspense | Histoires en N parties avec cliffhanger, label « PARTIE N », publication dans l'ordre |
+| Fond | Vidéos de cuisine « satisfying » | Ta banque de vidéos, par catégories |
 
-### Dashboard — `dashboard/.env.local`
+Le prompt est dans [`storyforge/story/prompts.py`](storyforge/story/prompts.py) et les formats/l'ADN dans
+[`storyforge/story/styles.py`](storyforge/story/styles.py). Tu peux aussi ajouter des **consignes perso par chaîne**
+depuis Telegram (thème, ton, interdits…).
 
-| Variable | Description |
-|---|---|
-| `NEXT_PUBLIC_API_URL` | Full URL to the bot's FastAPI backend — use Cloudflare Tunnel URL |
-| `NEXT_PUBLIC_DASHBOARD_API_KEY` | Must match `DASHBOARD_API_KEY` in the bot |
-| `NEXTAUTH_URL` | Your dashboard's public URL |
-| `NEXTAUTH_SECRET` | Random secret for NextAuth session signing |
-| `DISCORD_CLIENT_ID` | Discord OAuth2 client ID |
-| `DISCORD_CLIENT_SECRET` | Discord OAuth2 client secret |
-| `NEXT_PUBLIC_ADMIN_IDS` | Comma-separated Discord user IDs with admin access |
-| `NEXT_PUBLIC_BRAND_NAME` | Bot name shown in the dashboard UI |
-| `NEXT_PUBLIC_BRAND_NAME_WORD` | Short abbreviation shown in the dashboard |
+### Le fond vidéo aléatoire
+
+1. Une vidéo est tirée **au hasard** dans la banque (dans les catégories choisies pour la chaîne).
+2. Un **point de départ aléatoire** est tiré pour que la séquence couvre exactement la durée de la narration.
+   Exemple : fond de 43 min, narration de 1 min 38 → départ quelque part entre 0:05 et 41:17.
+3. Les passages **déjà utilisés récemment** (toutes chaînes confondues) sont évités : deux vidéos ne réutilisent pas le même extrait.
+4. La vidéo est recadrée en 9:16 (les fonds 16:9 type gameplay fonctionnent aussi). Si un fond est trop court, il est bouclé.
 
 ---
 
-## ✦ HTTPS Tunnel (Cloudflare)
+## Le dashboard Telegram
 
-The bot uses **pycloudflared** — a Python package that downloads the `cloudflared` binary automatically on first run. No CLI installs, no system packages — works on Pterodactyl and any Python host.
+Tout se pilote depuis le bot, dans un seul message qui se met à jour :
 
-**Why Cloudflare over ngrok:**
-- ✅ Unlimited bandwidth & requests — no monthly caps
-- ✅ Permanent URL that never changes between restarts
-- ✅ Free — no paid plan needed
-- ✅ Zero system installs — binary downloads via Python
+- **🏠 Accueil** : état du système, générées/publiées/échecs du jour, tâches en cours, chaînes et prochains créneaux, crédit ElevenLabs restant.
+- **📺 Chaînes** : activer/mettre en pause, ⚡ générer maintenant, 🚀 publier la suivante, 🎬 historique des vidéos, 🔗 lier YouTube / TikTok.
+- **✏️ Réglages par chaîne** : langue, formats d'histoires, narrateur, nombre de parties, durée, voix (liste de tes voix ElevenLabs), vitesse, fonds vidéo, style/couleur/position des sous-titres, label PARTIE, carte d'accroche, musique, horaires, fuseau, variation aléatoire des horaires, validation manuelle, réserve de vidéos d'avance, visibilité YouTube/TikTok, mode TikTok.
+- **Progression en direct** : chaque génération affiche un message qui avance (🧠 histoire → 🎙 voix → 🎞 fond → 🎬 montage avec barre de % → ✨).
+- **✋ Validation** : chaque vidéo t'est envoyée avec ✅ Valider · 🚀 Publier maintenant · 🔁 Régénérer · 🗑 Jeter · 📜 Texte complet.
+- **🔔 Notifications** : liens YouTube/TikTok dès la publication, erreurs avec bouton 🔁 Réessayer.
+- **📋 File & planning**, **📈 Statistiques** (14 jours), **🎞 Banque vidéos** (ajout de fonds par fichier ou par lien), **📜 Journal**, **⚙️ Réglages** (pause globale, diagnostic des APIs).
+- **🖥 Mini App** (optionnelle) : un vrai dashboard visuel qui s'ouvre dans Telegram (KPI, graphique 14 jours, vidéos à valider avec lecteur, chaînes avec interrupteurs, dernières publications). Thème clair/sombre automatique.
 
-**Setup (browser only, no CLI needed):**
+Seuls les comptes listés dans `TELEGRAM_ADMIN_IDS` peuvent utiliser le bot.
 
-1. Go to [one.dash.cloudflare.com](https://one.dash.cloudflare.com) → **Networks → Tunnels → Create a tunnel**
-2. Choose **Cloudflared**, give it a name (e.g. `rhealyst-api`), save
-3. On the **Install connector** step, copy the token from the command shown:
-   ```
-   cloudflared tunnel run --token <COPY_THIS>
-   ```
-4. Go to **Public Hostname** tab → add a hostname:
-   - Subdomain: `api` · Domain: `yourdomain.com` · Service: `http://localhost:8000`
-5. Add to `bot/.env`:
-   ```env
-   CF_TUNNEL_TOKEN = "eyJhIjoiXXXX..."
-   CF_TUNNEL_URL   = "https://api.yourdomain.com"
-   ```
+---
 
-On every startup the console prints:
-```
-◈ Tunnel: cloudflared binary ready — starting tunnel on port 8000…
-◈ Tunnel: API is live at  https://api.yourdomain.com
-  ↳ NEXT_PUBLIC_API_URL = https://api.yourdomain.com/api/v1
+## Installation
+
+### Prérequis
+
+- Python 3.11+ et **ffmpeg** (avec libass), ou Docker
+- Un bot Telegram (créé avec [@BotFather](https://t.me/BotFather))
+- Une clé API OpenAI et une clé API ElevenLabs
+- Pour publier : un projet Google Cloud (YouTube) et/ou une app TikTok for Developers
+
+### Avec Docker (recommandé)
+
+```bash
+cp .env.example .env        # puis remplis les clés
+mkdir -p data/backgrounds/cooking && cp mes_fonds/*.mp4 data/backgrounds/cooking/
+docker compose up -d --build
+docker compose logs -f
 ```
 
----
+### En local
 
-## ✦ Deployment
-
-### 🤖 Bot — any Python host
-
-1. Upload the entire `bot/` folder to your host (Pterodactyl, Render, Railway, Fly.io, VPS…)
-2. Set the start command to `python CodeX.py`
-3. Add all environment variables
-4. `pycloudflared` downloads the binary automatically on first run — no extra steps
-
-> Recommended free/cheap hosts: Render · Railway · Fly.io · VPS
->
-> ⭐ **[NexioHost](https://nexiohost.in)** — Premium bot hosting, built for Discord bots. Fast, reliable, and affordable.
-
-### 🌐 Dashboard — Vercel
-
-1. Go to [vercel.com](https://vercel.com) → **Add New Project** → connect your GitHub repo
-2. Set root directory to `dashboard/`
-3. Add all environment variables under **Settings → Environment Variables**
-4. Add the OAuth redirect URI in Discord Developer Portal:
-   ```
-   https://your-app.vercel.app/api/auth/callback/discord
-   ```
-5. Hit **Deploy** — done ✓
-
----
-
-## ✦ Emoji Sync
-
-Runs automatically on startup when `EMOJI_SYNC=true`:
-
-```
-★ Starting Application Emoji Sync — 144 unique emojis found in emoji.py
-◈ Found 144 templates | Application hosts 202 emojis
-↑ Uploading: ztick  (not in application emojis)
-✔ Uploaded: ztick  [saved as ID: 1234567890]
-✔ emoji.py patched in-place to reflect current API state.
-★ Restarting bot to load updated emoji IDs...
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt   # + pip install yt-dlp pour ajouter des fonds par lien
+cp .env.example .env
+python -m storyforge run
 ```
 
-| Event | Action |
-|---|---|
-| New emoji found | Uploaded to application, ID written to `emoji.py` |
-| Stale ID detected | `emoji.py` patched automatically |
-| No changes | Sync completes instantly, no restart |
-| After any patch | Bot restarts itself so fresh IDs are live |
+Ouvre ton bot et tape `/start`. Si ton ID n'est pas encore dans `TELEGRAM_ADMIN_IDS`, le bot te le donne.
+
+### Vérifier le montage sans aucune clé API
+
+```bash
+python -m storyforge demo            # sous-titres « pop » 1 mot
+python -m storyforge demo --style trio --card
+```
+La vidéo est écrite dans `data/demo/`.
+
+### Tester le prompt d'histoire
+
+```bash
+python -m storyforge story --lang fr --format askreddit --parts 2 --seconds 80
+```
 
 ---
 
-## ✦ Troubleshooting
+## Configuration des plateformes
 
-| Problem | Fix |
-|---|---|
-| Bot fails to start | Check `TOKEN` is set and bot has correct gateway intents |
-| Music not working | Verify `LAVALINK_HOST`, `LAVALINK_SECURE`, and `LAVALINK_PORT` |
-| Dashboard auth error | Check Discord OAuth client ID/secret and redirect URI |
-| Dashboard can't load data | Confirm `API_ENABLED=true`, bot is running, `NEXT_PUBLIC_API_URL` is correct |
-| Emojis showing as plain text | Run with `EMOJI_SYNC=true` once to upload and patch IDs |
-| CORS errors from dashboard | Add your Vercel URL to `CORS_ORIGINS` in `bot/.env` |
-| Tunnel not starting | Check `CF_TUNNEL_TOKEN` is valid and `pycloudflared` is installed |
-| Tunnel URL changed | Set `CF_TUNNEL_URL` — named tunnels always produce the same URL |
+### YouTube Shorts
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → nouveau projet → activer **YouTube Data API v3**.
+2. Écran de consentement OAuth (type *Externe*), ajoute ton compte Google en *utilisateur test*
+   (ou publie l'application pour éviter l'expiration des jetons au bout de 7 jours).
+3. Identifiants → **ID client OAuth** → type **Application de bureau** → télécharge le JSON
+   → place-le dans `secrets/google_client_secret.json`.
+4. Dans Telegram : chaîne → 🔗 YouTube → autorise → copie l'adresse de la page finale (même si elle affiche une erreur `localhost`) → colle-la dans le chat.
+
+> **Quota** : un projet Google a 10 000 unités/jour par défaut et un upload coûte environ 1 600 unités, soit ~6 vidéos/jour
+> **par projet**. Pour publier plus : demande une augmentation de quota, ou crée un projet par chaîne et dépose son
+> fichier sous `secrets/google_client_secret_<ID_CHAINE>.json` (il sera utilisé automatiquement pour cette chaîne).
+
+Les vidéos sont déclarées comme contenant des médias synthétiques (`containsSyntheticMedia`), comme l'exige YouTube pour une voix IA réaliste.
+
+### TikTok
+
+1. [developers.tiktok.com](https://developers.tiktok.com/) → crée une app → ajoute **Login Kit** et **Content Posting API**
+   (scopes `user.info.basic`, `video.upload`, `video.publish`).
+2. Déclare une **Redirect URI** en `https://…` (n'importe quelle page à toi) → renseigne `TIKTOK_CLIENT_KEY`,
+   `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI`.
+3. Dans Telegram : chaîne → 🔗 TikTok → autorise → colle l'adresse de la page de redirection.
+4. Optionnel : réglage « @ TikTok » de la chaîne pour que les liens des vidéos soient corrects.
+
+> **Important** : tant que ton app TikTok n'a pas passé l'audit de TikTok, la publication directe n'est autorisée
+> qu'en **privé** (`SELF_ONLY`). Deux solutions : faire auditer l'app, ou passer la chaîne en mode **📥 Brouillon** :
+> la vidéo arrive dans ta boîte de réception TikTok et tu la publies en un tap (pratique aussi pour ajouter un son tendance).
+> Les vidéos sont marquées « contenu généré par IA » (`is_aigc`).
+
+### Mini App (dashboard visuel)
+
+Il faut une URL publique **HTTPS** vers le port `WEBAPP_PORT` (reverse proxy Caddy/Nginx, Cloudflare Tunnel…) :
+
+```env
+WEBAPP_ENABLED=true
+PUBLIC_URL=https://studio.mondomaine.com
+```
+
+Au démarrage, le bouton **Dashboard** apparaît dans le menu du bot. Les requêtes sont authentifiées par la signature
+Telegram (`initData`) et réservées aux admins. Avec `PUBLIC_URL`, la liaison YouTube se fait aussi automatiquement
+(ajoute `https://…/oauth/youtube` aux URI de redirection autorisées du client OAuth, type *Application Web*).
 
 ---
 
-## ✦ Security
+## Utilisation
 
-- Never commit `.env` files — `.gitignore` already covers them
-- Use a strong, unique `NEXTAUTH_SECRET` and `DASHBOARD_API_KEY`
-- Rotate any secret that gets accidentally exposed
-- The bot API is always behind an API key — never expose it without one
+1. **🎞 Banque vidéos** : dépose des vidéos dans `data/backgrounds/<catégorie>/` (cooking, minecraft, satisfying…).
+   Privilégie des vidéos longues (20-60 min) et **dont tu as les droits**. Musique optionnelle dans `data/music/`.
+2. **➕ Nouvelle chaîne** : nom → langue → formats, voix, durée, parties…
+3. **🔗 Lier** YouTube et/ou TikTok (chaque chaîne a ses propres comptes : c'est ce qui permet le multi-instances).
+4. **▶️ Activer** : la chaîne fabrique sa **réserve** de vidéos d'avance, puis publie à chaque **créneau**
+   (avec une variation aléatoire de quelques minutes pour un rythme naturel).
+5. Avec **validation manuelle** ON, rien ne part sans ton ✅ ; OFF, tout est 100 % automatique.
+
+Après un échec, la génération automatique d'une chaîne réessaie avec un délai croissant (5 min → 2 h) pour ne pas consommer de crédits en boucle.
 
 ---
 
-<div align="center">
+## Architecture
 
-## ✦ CodeX Devs
+```
+storyforge/
+├── __main__.py          # CLI : run | demo | story
+├── config.py            # réglages (.env)
+├── models.py · db.py    # SQLite (chaînes, histoires, vidéos, publications, journal)
+├── core.py              # services partagés : files, planning, OAuth, quotas
+├── pipeline.py          # histoire → voix → fond → montage → publication
+├── scheduler.py         # créneaux par chaîne (APScheduler) + réapprovisionnement
+├── jobs.py              # files asynchrones (rendus / publications)
+├── stats.py             # agrégats pour les dashboards
+├── story/               # prompts, formats, ADN aléatoire, client OpenAI
+├── tts/                 # ElevenLabs (avec horodatage) + resserrage des silences
+├── video/               # banque de fonds, sous-titres ASS, carte d'accroche, rendu ffmpeg
+├── publishers/          # YouTube Data API v3 · TikTok Content Posting API
+├── bot/                 # dashboard Telegram (écrans, réglages, notifications)
+└── webapp/              # Mini App (FastAPI + page unique) et retours OAuth
+```
 
-*Built for protection. Designed for style.*
+### Tests
 
-<a href="https://discord.gg/codexdev"><img src="https://discord.com/api/guilds/1301573144817045524/widget.png?style=banner2" alt="CodeX Development Discord Server" width="480"/></a>
+```bash
+pip install pytest pytest-asyncio
+pytest
+```
 
-<p>
-  <a href="https://discord.gg/codexdev"><img src="https://img.shields.io/badge/Discord-Join_Server-5865F2?style=for-the-badge&logo=discord&logoColor=white"/></a>
-  <a href="https://youtube.com/@CodeXDevs"><img src="https://img.shields.io/badge/YouTube-CodeXDevs-FF0000?style=for-the-badge&logo=youtube&logoColor=white"/></a>
-  <a href="https://github.com/RayExo"><img src="https://img.shields.io/badge/GitHub-RayExo-181717?style=for-the-badge&logo=github&logoColor=white"/></a>
-  <a href="https://nexiohost.in"><img src="https://img.shields.io/badge/⭐%20PREMIUM%20HOSTING-NexioHost-FFD700?style=for-the-badge&labelColor=1a1a2e&color=FFD700&logoColor=FFD700"/></a>
-</p>
+Les tests couvrent le découpage mot à mot, le resserrage des silences, le tirage du fond, les sous-titres,
+la génération d'histoire (OpenAI simulé), le pipeline complet avec ffmpeg réel (APIs simulées), l'API de la
+Mini App, et la navigation complète du bot Telegram.
 
-© 2026 CodeX Devs — MIT License
+---
 
-</div>
+## Bon à savoir
+
+- **Coûts** : une vidéo de 90 s ≈ 1 500-2 000 caractères ElevenLabs et ~3 000 tokens OpenAI.
+- **Telegram** limite les envois de bot à 50 Mo (un aperçu allégé est généré si besoin) et les téléchargements à 20 Mo
+  (pour de gros fonds, utilise un lien ou dépose-les dans `data/backgrounds/`).
+- **Politiques des plateformes** : YouTube et TikTok peuvent limiter la monétisation des contenus jugés « réutilisés » ou
+  répétitifs. Les histoires originales, les séquences de fond toujours différentes et la variation des horaires aident,
+  mais publie des contenus qui apportent de la valeur et respecte les droits des vidéos de fond.
+- Les fichiers vidéo publiés sont supprimés après `KEEP_VIDEOS_DAYS` jours (l'historique reste en base).
