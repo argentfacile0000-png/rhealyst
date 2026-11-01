@@ -201,4 +201,4 @@ async def test_non_admin_is_rejected(svc):
     upd = SimpleNamespace(callback_query=q, effective_user=SimpleNamespace(id=999),
                           effective_chat=SimpleNamespace(id=999), effective_message=q.message)
     await handlers.on_callback(upd, ctx)
-    assert q.answers == ["⛔ Accès refusé"] and not q.edits
+    assert q.answers == ["Accès refusé"] and not q.edits

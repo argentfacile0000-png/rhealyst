@@ -1,205 +1,305 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>StoryForge</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>
-:root{
-  --bg:#0a0a12;--bg2:#12121e;--card:#161624;--card2:#1d1d2e;--line:#26263a;
-  --text:#f3f3f8;--muted:#9a9ab3;--faint:#6b6b85;
-  --accent:#7c5cff;--accent2:#ff4fa3;--ok:#22c55e;--warn:#f5b524;--err:#ef4444;--info:#38bdf8;
-  --yt:#ff3b3b;--tt:#25f4ee;
-  --radius:20px;--shadow:0 10px 30px rgba(0,0,0,.35);
-}
-:root[data-theme="light"]{
-  --bg:#f4f4fa;--bg2:#ffffff;--card:#ffffff;--card2:#f1f0f8;--line:#e4e3ef;
-  --text:#14141f;--muted:#5d5d78;--faint:#9897ad;--shadow:0 8px 24px rgba(30,20,80,.08);
-}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Inter,sans-serif}
-body{padding:0 0 40px;min-height:100vh;overflow-x:hidden}
-.wrap{max-width:720px;margin:0 auto;padding:0 16px}
-header{position:relative;padding:22px 0 18px;overflow:hidden}
-header::before{content:"";position:absolute;inset:-80px -40px auto;height:260px;z-index:0;
-  background:radial-gradient(closest-side,rgba(124,92,255,.45),transparent 70%),
-             radial-gradient(closest-side at 85% 30%,rgba(255,79,163,.35),transparent 70%);filter:blur(10px)}
-.top{position:relative;z-index:1;display:flex;align-items:center;gap:12px}
-.logo{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:24px;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));box-shadow:0 8px 24px rgba(124,92,255,.45)}
-.brand h1{margin:0;font-size:20px;letter-spacing:.3px}
-.brand small{color:var(--muted);font-size:12.5px}
-.top .sp{flex:1}
-.pill{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border-radius:999px;font-size:12px;font-weight:600;
-  background:var(--card2);border:1px solid var(--line);white-space:nowrap}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(34,197,94,.18)}
-.paused .dot{background:var(--warn);box-shadow:0 0 0 4px rgba(245,181,36,.18)}
-.iconbtn{width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--card);
-  color:var(--text);font-size:17px;display:grid;place-items:center;cursor:pointer}
-.iconbtn:active{transform:scale(.94)}
-.kpis{position:relative;z-index:1;display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:18px}
-@media(min-width:560px){.kpis{grid-template-columns:repeat(4,1fr)}}
-.kpi{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow)}
-.kpi .ic{font-size:18px}
-.kpi .v{font-size:28px;font-weight:800;margin-top:6px;letter-spacing:-.5px}
-.kpi .l{font-size:12px;color:var(--muted);margin-top:2px}
-section{margin-top:22px}
-.sh{display:flex;align-items:baseline;justify-content:space-between;margin:0 2px 10px}
-.sh h2{font-size:16px;margin:0}
-.sh span{font-size:12px;color:var(--muted)}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
-.chart svg{width:100%;height:150px;display:block}
-.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:8px}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
-.quota{margin-top:12px}
-.bar{height:10px;border-radius:99px;background:var(--card2);overflow:hidden;border:1px solid var(--line)}
-.bar>div{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--accent),var(--accent2))}
-.quota .row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:8px}
-.hscroll{display:flex;gap:12px;overflow-x:auto;padding:2px 2px 8px;scroll-snap-type:x mandatory}
-.hscroll::-webkit-scrollbar{display:none}
-.appr{flex:0 0 172px;scroll-snap-align:start;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden}
-.thumb{position:relative;aspect-ratio:9/16;background:linear-gradient(160deg,#2a2150,#3b1a3a);cursor:pointer}
-.thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.thumb .play{position:absolute;inset:0;display:grid;place-items:center;font-size:34px;
-  background:linear-gradient(transparent 55%,rgba(0,0,0,.65))}
-.thumb .dur{position:absolute;right:8px;bottom:8px;font-size:11px;font-weight:700;padding:3px 7px;border-radius:8px;background:rgba(0,0,0,.6);color:#fff}
-.appr .meta{padding:10px}
-.appr .t{font-size:13px;font-weight:700;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.appr .c{font-size:11.5px;color:var(--muted);margin-top:4px}
-.acts{display:flex;gap:6px;margin-top:10px}
-.btn{flex:1;border:0;border-radius:12px;padding:10px 8px;font-size:13px;font-weight:700;cursor:pointer;color:#fff;
-  background:var(--card2);color:var(--text);border:1px solid var(--line)}
-.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));border:0;color:#fff}
-.btn.ok{background:rgba(34,197,94,.15);color:var(--ok);border-color:rgba(34,197,94,.3)}
-.btn.danger{background:rgba(239,68,68,.12);color:var(--err);border-color:rgba(239,68,68,.25)}
-.btn:active{transform:scale(.97)}
-.btn:disabled{opacity:.5}
-.ch{display:flex;flex-direction:column;gap:12px}
-.chc{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;box-shadow:var(--shadow)}
-.chc .h{display:flex;align-items:center;gap:10px}
-.chc .name{font-weight:800;font-size:15.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
-.chip{font-size:11.5px;font-weight:600;padding:5px 9px;border-radius:999px;background:var(--card2);border:1px solid var(--line);color:var(--muted)}
-.chip.yt.on{color:var(--yt);border-color:rgba(255,59,59,.35)}
-.chip.tt.on{color:var(--tt);border-color:rgba(37,244,238,.35)}
-.chip.off{opacity:.55;text-decoration:line-through}
-.switch{position:relative;width:46px;height:28px;flex:0 0 auto}
-.switch input{display:none}
-.switch span{position:absolute;inset:0;border-radius:99px;background:var(--card2);border:1px solid var(--line);transition:.2s;cursor:pointer}
-.switch span::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.2s;box-shadow:0 2px 6px rgba(0,0,0,.3)}
-.switch input:checked+span{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:transparent}
-.switch input:checked+span::after{transform:translateX(18px)}
-.list{display:flex;flex-direction:column;gap:8px}
-.row{display:flex;gap:12px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px}
-.row .mini{width:44px;height:78px;border-radius:10px;overflow:hidden;flex:0 0 auto;background:linear-gradient(160deg,#2a2150,#3b1a3a)}
-.row .mini img{width:100%;height:100%;object-fit:cover}
-.row .b{flex:1;min-width:0}
-.row .t{font-size:13.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.row .s{font-size:12px;color:var(--muted);margin-top:3px}
-.st{font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;display:inline-block}
-.st.published{background:rgba(34,197,94,.15);color:var(--ok)}
-.st.ready{background:rgba(56,189,248,.15);color:var(--info)}
-.st.pending_approval{background:rgba(245,181,36,.15);color:var(--warn)}
-.st.failed{background:rgba(239,68,68,.15);color:var(--err)}
-.st.rendering,.st.publishing{background:rgba(124,92,255,.18);color:var(--accent)}
-.st.discarded{background:var(--card2);color:var(--faint)}
-.links{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
-.links a{font-size:11.5px;font-weight:700;text-decoration:none;padding:3px 8px;border-radius:8px;background:var(--card2);color:var(--text)}
-.job{display:flex;align-items:center;gap:10px;font-size:13px;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:14px}
-.spin{width:16px;height:16px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--accent);animation:sp 1s linear infinite}
-@keyframes sp{to{transform:rotate(360deg)}}
-.empty{color:var(--muted);font-size:13px;text-align:center;padding:18px;border:1px dashed var(--line);border-radius:16px}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(120px);background:var(--card2);color:var(--text);
-  border:1px solid var(--line);padding:12px 16px;border-radius:14px;font-size:13.5px;font-weight:600;box-shadow:var(--shadow);
-  transition:.3s;z-index:20;max-width:90vw}
-.toast.on{transform:translateX(-50%) translateY(0)}
-.modal{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;place-items:center;z-index:30;padding:16px}
-.modal.on{display:grid}
-.modal video{max-height:82vh;max-width:100%;border-radius:18px;background:#000}
-.gate{min-height:100vh;display:grid;place-items:center;text-align:center;padding:24px;color:var(--muted)}
-.gate b{color:var(--text);font-size:18px;display:block;margin-bottom:8px}
-.skeleton{opacity:.5}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>StoryForge</title>
+  <meta name="description" content="Studio de pilotage StoryForge : chaînes, validations et publications.">
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { fontFamily: { sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'] } } },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* Minimal Design System v2.0 — tokens HSL (shadcn) */
+    :root {
+      --background: 0 0% 100%;
+      --foreground: 240 10% 3.9%;
+      --card: 0 0% 100%;
+      --card-foreground: 240 10% 3.9%;
+      --primary: 240 5.9% 10%;
+      --primary-foreground: 0 0% 98%;
+      --secondary: 240 4.8% 95.9%;
+      --secondary-foreground: 240 5.9% 10%;
+      --muted: 240 4.8% 95.9%;
+      --muted-foreground: 240 3.8% 46.1%;
+      --accent: 240 4.8% 95.9%;
+      --accent-foreground: 240 5.9% 10%;
+      --border: 240 5.9% 90%;
+      --ring: 240 5.9% 10%;
+      --radius: 0.5rem;
+    }
+    /* Le thème suit Telegram (classe .dark), à défaut prefers-color-scheme */
+    .dark {
+      --background: 240 10% 3.9%;
+      --foreground: 0 0% 98%;
+      --card: 240 10% 3.9%;
+      --card-foreground: 0 0% 98%;
+      --primary: 0 0% 98%;
+      --primary-foreground: 240 5.9% 10%;
+      --secondary: 240 3.7% 15.9%;
+      --secondary-foreground: 0 0% 98%;
+      --muted: 240 3.7% 15.9%;
+      --muted-foreground: 240 5% 64.9%;
+      --accent: 240 3.7% 15.9%;
+      --accent-foreground: 0 0% 98%;
+      --border: 240 3.7% 15.9%;
+      --ring: 240 4.9% 83.9%;
+    }
+
+    * { font-family: 'Inter', system-ui, sans-serif; }
+    body { background-color: hsl(var(--background)); color: hsl(var(--foreground)); -webkit-tap-highlight-color: transparent; }
+
+    .text-muted { color: hsl(var(--muted-foreground)); }
+    .bg-muted { background-color: hsl(var(--muted)); }
+    .bg-muted-50 { background-color: hsl(var(--muted) / 0.5); }
+    .bg-card { background-color: hsl(var(--card)); }
+    .border-default { border-color: hsl(var(--border)); }
+    .bg-primary { background-color: hsl(var(--primary)); }
+    .text-primary-foreground { color: hsl(var(--primary-foreground)); }
+    .divide-default > * + * { border-color: hsl(var(--border)); }
+
+    a:focus-visible, button:focus-visible, input:focus-visible {
+      outline: 2px solid hsl(var(--ring));
+      outline-offset: 2px;
+    }
+
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+
+    @keyframes pulse-slow { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+    .animate-pulse-slow { animation: pulse-slow 2.4s ease-in-out infinite; }
+
+    /* Interrupteur */
+    .switch { position: relative; width: 44px; height: 24px; flex: none; }
+    .switch input { position: absolute; inset: 0; opacity: 0; cursor: pointer; margin: 0; }
+    .switch .track { position: absolute; inset: 0; border-radius: 9999px; background: hsl(var(--muted)); border: 1px solid hsl(var(--border)); transition: background-color .15s; pointer-events: none; }
+    .switch .thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 9999px; background: hsl(var(--background)); box-shadow: 0 1px 2px rgb(0 0 0 / .2); transition: transform .15s; pointer-events: none; }
+    .switch input:checked ~ .track { background: hsl(var(--primary)); border-color: hsl(var(--primary)); }
+    .switch input:checked ~ .thumb { transform: translateX(20px); }
+    .switch input:focus-visible ~ .track { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+
+    .chart-tip { pointer-events: none; transform: translate(-50%, -100%); white-space: nowrap; }
+  </style>
 </head>
-<body>
-<div id="app" class="wrap skeleton">
-  <header>
-    <div class="top">
-      <div class="logo">🎬</div>
-      <div class="brand"><h1>StoryForge</h1><small id="hello">Control Center</small></div>
-      <div class="sp"></div>
-      <span class="pill" id="status"><span class="dot"></span><span id="statusTxt">…</span></span>
-      <button class="iconbtn" id="pauseBtn" title="Pause globale">⏸</button>
-    </div>
-    <div class="kpis">
-      <div class="kpi"><div class="ic">🎥</div><div class="v" id="kGen">–</div><div class="l">générées aujourd'hui</div></div>
-      <div class="kpi"><div class="ic">🚀</div><div class="v" id="kPub">–</div><div class="l" id="kPubL">publiées</div></div>
-      <div class="kpi"><div class="ic">🟡</div><div class="v" id="kAppr">–</div><div class="l">à valider</div></div>
-      <div class="kpi"><div class="ic">❌</div><div class="v" id="kFail">–</div><div class="l">échecs du jour</div></div>
+<body class="min-h-screen antialiased">
+
+  <!-- En-tête -->
+  <header class="sticky top-0 z-40 border-b border-default bg-[hsl(var(--background))]/95 backdrop-blur supports-[backdrop-filter]:bg-[hsl(var(--background))]/70">
+    <div class="max-w-3xl mx-auto px-5 h-16 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 rounded-full bg-muted flex items-center justify-center shrink-0">
+          <span class="text-xs font-semibold tracking-tight">SF</span>
+        </div>
+        <div class="min-w-0">
+          <h1 class="font-semibold tracking-tight leading-tight">StoryForge</h1>
+          <p class="text-xs text-muted truncate" id="subtitle">Studio</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="systemBadge" class="inline-flex"></span>
+        <button id="pauseBtn" type="button" class="w-10 h-10 inline-flex items-center justify-center rounded-md border border-default hover:bg-muted transition-colors" aria-label="Mettre le système en pause"></button>
+      </div>
     </div>
   </header>
 
-  <section>
-    <div class="sh"><h2>Activité · 14 jours</h2><span id="totals"></span></div>
-    <div class="card chart">
-      <svg id="chart" viewBox="0 0 700 150" preserveAspectRatio="none" aria-label="Publications et générations sur 14 jours"></svg>
-      <div class="legend"><span><i style="background:linear-gradient(135deg,var(--accent),var(--accent2))"></i>Publications</span>
-        <span><i style="background:var(--line)"></i>Vidéos générées</span></div>
-      <div class="quota" id="quota"></div>
+  <main id="app" class="max-w-3xl mx-auto px-5 py-8 space-y-12">
+
+    <!-- Indicateurs -->
+    <section aria-labelledby="kpiTitle">
+      <h2 id="kpiTitle" class="sr-only">Aujourd'hui</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="p-4 rounded-lg border border-default bg-card">
+          <p class="text-sm text-muted mb-1">Générées</p>
+          <p class="text-3xl font-bold tracking-tight" id="kGen">–</p>
+          <p class="text-xs text-muted mt-1">aujourd'hui</p>
+        </div>
+        <div class="p-4 rounded-lg border border-default bg-card">
+          <p class="text-sm text-muted mb-1">Publiées</p>
+          <p class="text-3xl font-bold tracking-tight" id="kPub">–</p>
+          <p class="text-xs text-muted mt-1" id="kPubSub">YouTube · TikTok</p>
+        </div>
+        <div class="p-4 rounded-lg border border-default bg-card">
+          <p class="text-sm text-muted mb-1">À valider</p>
+          <p class="text-3xl font-bold tracking-tight" id="kAppr">–</p>
+          <p class="text-xs text-muted mt-1" id="kApprSub">en attente</p>
+        </div>
+        <div class="p-4 rounded-lg border border-default bg-card">
+          <p class="text-sm text-muted mb-1">Échecs</p>
+          <p class="text-3xl font-bold tracking-tight" id="kFail">–</p>
+          <p class="text-xs mt-1" id="kFailSub">aujourd'hui</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Publications -->
+    <section aria-labelledby="chartTitle">
+      <div class="flex items-end justify-between gap-4 mb-4">
+        <div>
+          <h2 id="chartTitle" class="text-lg font-semibold tracking-tight">Publications</h2>
+          <p class="text-sm text-muted" id="chartSub">14 jours</p>
+        </div>
+        <div class="inline-flex p-1 rounded-md bg-muted text-sm" role="tablist" aria-label="Affichage">
+          <button type="button" role="tab" data-view="chart" class="view-btn h-9 px-3 rounded font-medium">Graphique</button>
+          <button type="button" role="tab" data-view="table" class="view-btn h-9 px-3 rounded font-medium">Tableau</button>
+        </div>
+      </div>
+      <div class="p-5 rounded-lg border border-default bg-card">
+        <div id="chartWrap" class="relative">
+          <svg id="chart" class="block w-full" height="168" role="img" aria-label="Publications par jour sur 14 jours"></svg>
+          <div id="chartTip" class="chart-tip absolute hidden px-3 py-2 rounded-md border border-default bg-card text-xs shadow-sm"></div>
+        </div>
+        <div id="chartTable" class="hidden overflow-hidden rounded-md border border-default">
+          <table class="w-full text-sm">
+            <caption class="sr-only">Publications et vidéos générées par jour</caption>
+            <thead class="bg-muted-50 text-xs text-muted">
+              <tr><th class="text-left font-medium px-3 py-2">Jour</th><th class="text-right font-medium px-3 py-2">Publiées</th><th class="text-right font-medium px-3 py-2">Générées</th></tr>
+            </thead>
+            <tbody id="chartRows" class="divide-y divide-default"></tbody>
+          </table>
+        </div>
+        <div id="quota" class="mt-6 pt-5 border-t border-default hidden">
+          <div class="flex justify-between text-sm mb-2">
+            <span>Crédits ElevenLabs</span>
+            <span class="text-muted" id="quotaTxt"></span>
+          </div>
+          <div class="h-2 rounded-full bg-muted overflow-hidden">
+            <div id="quotaBar" class="h-full bg-primary rounded-full" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- À valider -->
+    <section id="apprSec" class="hidden" aria-labelledby="apprTitle">
+      <div class="flex items-end justify-between mb-4">
+        <h2 id="apprTitle" class="text-lg font-semibold tracking-tight">À valider</h2>
+        <span class="text-sm text-muted" id="apprCount"></span>
+      </div>
+      <div id="approvals" class="-mx-5 px-5 scroll-px-5 flex gap-4 overflow-x-auto snap-x snap-mandatory overscroll-x-contain hide-scrollbar pb-1"></div>
+    </section>
+
+    <!-- Chaînes -->
+    <section aria-labelledby="chTitle">
+      <div class="flex items-end justify-between mb-4">
+        <h2 id="chTitle" class="text-lg font-semibold tracking-tight">Chaînes</h2>
+        <span class="text-sm text-muted" id="chCount"></span>
+      </div>
+      <div id="channels" class="rounded-lg border border-default bg-card divide-y divide-default"></div>
+    </section>
+
+    <!-- En cours -->
+    <section id="jobsSec" class="hidden" aria-labelledby="jobsTitle">
+      <div class="flex items-end justify-between mb-4">
+        <h2 id="jobsTitle" class="text-lg font-semibold tracking-tight">En cours</h2>
+        <span class="text-sm text-muted" id="jobCount"></span>
+      </div>
+      <div id="jobs" class="rounded-lg border border-default bg-card divide-y divide-default"></div>
+    </section>
+
+    <!-- Dernières vidéos -->
+    <section aria-labelledby="recentTitle">
+      <h2 id="recentTitle" class="text-lg font-semibold tracking-tight mb-4">Dernières vidéos</h2>
+      <div class="rounded-lg border border-default bg-card overflow-hidden">
+        <div class="flex justify-between px-4 py-2.5 bg-muted-50 text-xs text-muted font-medium border-b border-default">
+          <span>Vidéo</span><span>Statut</span>
+        </div>
+        <div id="recent" class="divide-y divide-default"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="border-t border-default mt-4">
+    <div class="max-w-3xl mx-auto px-5 py-5 flex justify-between items-center gap-4">
+      <p class="text-xs text-muted">StoryForge 1.0</p>
+      <p class="text-xs text-muted" id="synced">—</p>
     </div>
-  </section>
+  </footer>
 
-  <section id="apprSec">
-    <div class="sh"><h2>À valider</h2><span id="apprCount"></span></div>
-    <div class="hscroll" id="approvals"></div>
-  </section>
+  <!-- Notification -->
+  <div id="toast" role="status" aria-live="polite" class="fixed left-1/2 bottom-6 -translate-x-1/2 z-50 px-4 py-3 rounded-md bg-primary text-primary-foreground text-sm font-medium shadow-md transition-all duration-200 opacity-0 translate-y-4 pointer-events-none"></div>
 
-  <section>
-    <div class="sh"><h2>Chaînes</h2><span id="chCount"></span></div>
-    <div class="ch" id="channels"></div>
-  </section>
-
-  <section id="jobsSec">
-    <div class="sh"><h2>En cours</h2><span id="jobCount"></span></div>
-    <div class="list" id="jobs"></div>
-  </section>
-
-  <section>
-    <div class="sh"><h2>Dernières vidéos</h2><span></span></div>
-    <div class="list" id="recent"></div>
-  </section>
-</div>
-<div class="toast" id="toast"></div>
-<div class="modal" id="modal"><video id="player" controls playsinline></video></div>
+  <!-- Lecteur -->
+  <div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center p-5 bg-[hsl(var(--background))]/90 backdrop-blur" role="dialog" aria-modal="true" aria-label="Aperçu vidéo">
+    <div class="relative">
+      <video id="player" controls playsinline class="max-h-[80vh] max-w-full rounded-lg border border-default bg-black"></video>
+      <button id="closeModal" type="button" class="absolute -top-3 -right-3 w-10 h-10 inline-flex items-center justify-center rounded-full border border-default bg-card hover:bg-muted transition-colors" aria-label="Fermer l'aperçu"></button>
+    </div>
+  </div>
 
 <script>
 const tg = window.Telegram ? window.Telegram.WebApp : null;
 const INIT = tg ? tg.initData : "";
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const STATUS = {rendering:"En fabrication",pending_approval:"À valider",ready:"Prête",publishing:"Publication…",
-  published:"Publiée",failed:"Échec",discarded:"Jetée"};
-const mmss = (s) => `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,"0")}`;
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const mmss = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 const media = (kind, id) => `/media/${kind}/${id}?tma=${encodeURIComponent(INIT)}`;
+const nf = new Intl.NumberFormat("fr-FR");
 
-if (tg) {
-  tg.ready(); tg.expand();
-  try { tg.setHeaderColor("secondary_bg_color"); } catch (e) {}
-  document.documentElement.dataset.theme = tg.colorScheme === "light" ? "light" : "dark";
-  tg.onEvent("themeChanged", () => document.documentElement.dataset.theme = tg.colorScheme === "light" ? "light" : "dark");
+/* Icônes (tracé Lucide, décoratives) */
+const ICONS = {
+  pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
+  play: '<path d="m6 3 14 9-14 9V3z"/>',
+  zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+  send: '<path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+};
+const icon = (name, cls = "w-4 h-4") =>
+  `<svg class="${cls}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+
+/* Badges de statut (couleur réservée aux statuts, toujours avec un libellé) */
+const TONES = {
+  success: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
+  info: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20",
+  warning: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400 border border-yellow-500/20",
+  error: "bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20",
+  neutral: "bg-muted text-muted border border-default",
+};
+const badge = (label, tone = "neutral", pulse = false) =>
+  `<span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full whitespace-nowrap ${TONES[tone]}">${pulse ? '<span class="w-1.5 h-1.5 rounded-full bg-current animate-pulse-slow"></span>' : ""}${esc(label)}</span>`;
+const STATUS = {
+  rendering: ["En cours", "neutral", true], publishing: ["Publication", "neutral", true],
+  pending_approval: ["À valider", "warning"], ready: ["Prête", "info"], published: ["Publiée", "success"],
+  failed: ["Échec", "error"], discarded: ["Jetée", "neutral"],
+};
+const statusBadge = (s) => badge(...(STATUS[s] || [s, "neutral"]));
+
+const BTN_PRIMARY = "inline-flex items-center justify-center gap-2 h-10 px-4 bg-primary text-primary-foreground text-sm font-medium rounded-md hover:opacity-90 transition-opacity disabled:opacity-50";
+const BTN_SECONDARY = "inline-flex items-center justify-center gap-2 h-10 px-4 border border-default text-sm font-medium rounded-md hover:bg-muted transition-colors disabled:opacity-50";
+const BTN_ICON = "inline-flex items-center justify-center w-10 h-10 rounded-md border border-default hover:bg-muted transition-colors disabled:opacity-50";
+
+/* Thème */
+function applyTheme() {
+  const dark = tg && tg.colorScheme ? tg.colorScheme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.classList.toggle("dark", dark);
+  try { tg.setHeaderColor(dark ? "#09090b" : "#ffffff"); tg.setBackgroundColor(dark ? "#09090b" : "#ffffff"); } catch (e) {}
 }
+if (tg) { tg.ready(); tg.expand(); tg.onEvent("themeChanged", applyTheme); }
+applyTheme();
 
-function haptic(type = "light") { try { tg.HapticFeedback.impactOccurred(type); } catch (e) {} }
+function haptic(kind = "light") { try { tg.HapticFeedback.impactOccurred(kind); } catch (e) {} }
 let toastTimer;
 function toast(msg) {
-  const t = $("toast"); t.textContent = msg; t.classList.add("on");
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("on"), 2600);
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.remove("opacity-0", "translate-y-4");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add("opacity-0", "translate-y-4"), 2600);
 }
 
 async function api(path, method = "GET") {
-  const r = await fetch(path, {method, headers: {"X-Telegram-Init-Data": INIT}});
+  const r = await fetch(path, { method, headers: { "X-Telegram-Init-Data": INIT } });
   if (!r.ok) {
     let msg = r.status === 401 ? "Accès refusé" : `Erreur ${r.status}`;
     try { msg = (await r.json()).detail || msg; } catch (e) {}
@@ -210,122 +310,264 @@ async function api(path, method = "GET") {
 
 async function act(path, okMsg) {
   haptic("medium");
-  try { await api(path, "POST"); toast(okMsg); try { tg.HapticFeedback.notificationOccurred("success"); } catch (e) {} }
-  catch (e) { toast("⚠️ " + e.message); try { tg.HapticFeedback.notificationOccurred("error"); } catch (x) {} }
+  try {
+    await api(path, "POST");
+    toast(okMsg);
+    try { tg.HapticFeedback.notificationOccurred("success"); } catch (e) {}
+  } catch (e) {
+    toast(e.message);
+    try { tg.HapticFeedback.notificationOccurred("error"); } catch (x) {}
+  }
   load();
 }
 
-function chart(series) {
-  const svg = $("chart"), W = 700, H = 150, pad = 18, n = series.labels.length;
-  const max = Math.max(1, ...series.published, ...series.generated);
-  const slot = (W - pad * 2) / n, bw = Math.min(16, slot / 3);
-  let out = `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff4fa3"/><stop offset="1" stop-color="#7c5cff"/></linearGradient></defs>`;
-  for (let i = 0; i < n; i++) {
-    const x = pad + i * slot + slot / 2;
-    const hg = (series.generated[i] / max) * (H - 40), hp = (series.published[i] / max) * (H - 40);
-    out += `<rect x="${x - bw - 1}" y="${H - 22 - hg}" width="${bw}" height="${Math.max(hg, 2)}" rx="4" fill="var(--line)"/>`;
-    out += `<rect x="${x + 1}" y="${H - 22 - hp}" width="${bw}" height="${Math.max(hp, 2)}" rx="4" fill="url(#g)"/>`;
-    if (i % 2 === (n - 1) % 2) out += `<text x="${x}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--faint)">${esc(series.labels[i])}</text>`;
+/* Graphique : une série (publications/jour), barres fines, infobulle, vue tableau */
+let lastSeries = null;
+let view = "chart";
+function drawChart(series) {
+  lastSeries = series;
+  const svg = $("chart");
+  const W = Math.max(280, $("chartWrap").clientWidth);
+  const H = 168, top = 22, bottom = 24, left = 24, right = 14;
+  const plotH = H - top - bottom;
+  const n = series.labels.length;
+  const max = Math.max(1, ...series.published);
+  const step = max <= 4 ? 1 : Math.ceil(max / 4);
+  const yMax = Math.max(step * Math.ceil(max / step), 1);
+  const slot = (W - left - right) / n;
+  const bw = Math.min(24, slot * 0.56);
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("width", W);
+
+  const grid = "hsl(var(--border))", ink = "hsl(var(--primary))", muted = "hsl(var(--muted-foreground))";
+  let out = "";
+  for (let v = 0; v <= yMax; v += step) {
+    const y = top + plotH - (v / yMax) * plotH;
+    out += `<line x1="${left}" x2="${W - right}" y1="${y}" y2="${y}" stroke="${grid}" stroke-width="1"/>`;
+    out += `<text x="0" y="${y + 4}" font-size="11" fill="${muted}">${v}</text>`;
   }
+  series.published.forEach((v, i) => {
+    const cx = left + slot * i + slot / 2;
+    const h = (v / yMax) * plotH;
+    const x = cx - bw / 2, y = top + plotH - h, r = Math.min(4, h, bw / 2);
+    if (h > 0) {
+      out += `<path d="M${x},${top + plotH} V${y + r} Q${x},${y} ${x + r},${y} H${x + bw - r} Q${x + bw},${y} ${x + bw},${y + r} V${top + plotH} Z" fill="${ink}"/>`;
+    }
+    if (i === n - 1 && v > 0) {
+      out += `<text x="${cx}" y="${y - 6}" text-anchor="middle" font-size="11" font-weight="600" fill="hsl(var(--foreground))">${v}</text>`;
+    }
+    if (i % 2 === (n - 1) % 2) {
+      out += `<text x="${cx}" y="${H - 6}" text-anchor="middle" font-size="11" fill="${muted}">${esc(series.labels[i])}</text>`;
+    }
+    out += `<rect class="hit" data-i="${i}" x="${left + slot * i}" y="${top}" width="${slot}" height="${plotH}" fill="transparent"/>`;
+  });
   svg.innerHTML = out;
-  const tp = series.published.reduce((a, b) => a + b, 0), tgn = series.generated.reduce((a, b) => a + b, 0);
-  $("totals").textContent = `${tp} publiées · ${tgn} générées`;
+
+  const tip = $("chartTip");
+  svg.querySelectorAll(".hit").forEach((el) => {
+    const show = () => {
+      const i = +el.dataset.i;
+      const cx = left + slot * i + slot / 2;
+      const h = (series.published[i] / yMax) * plotH;
+      tip.innerHTML = `<p class="font-medium">${esc(series.labels[i])}</p><p class="text-muted">${series.published[i]} publiée${series.published[i] > 1 ? "s" : ""} · ${series.generated[i]} générée${series.generated[i] > 1 ? "s" : ""}</p>`;
+      tip.style.left = `${Math.min(Math.max(cx, 70), W - 70)}px`;
+      tip.style.top = `${top + plotH - h - 8}px`;
+      tip.classList.remove("hidden");
+    };
+    el.addEventListener("pointerenter", show);
+    el.addEventListener("pointerdown", show);
+    el.addEventListener("pointerleave", () => tip.classList.add("hidden"));
+  });
+
+  $("chartRows").innerHTML = series.labels.map((d, i) => `
+    <tr><td class="px-3 py-2">${esc(d)}</td><td class="px-3 py-2 text-right font-medium">${series.published[i]}</td>
+    <td class="px-3 py-2 text-right text-muted">${series.generated[i]}</td></tr>`).reverse().join("");
+  const total = series.published.reduce((a, b) => a + b, 0);
+  $("chartSub").textContent = `14 jours · ${total} au total`;
+}
+
+function setView(v) {
+  view = v;
+  document.querySelectorAll(".view-btn").forEach((b) => {
+    const on = b.dataset.view === v;
+    b.setAttribute("aria-selected", on);
+    b.className = `view-btn h-9 px-3 rounded font-medium transition-colors ${on ? "bg-card shadow-sm" : "text-muted hover:text-[hsl(var(--foreground))]"}`;
+  });
+  $("chartWrap").classList.toggle("hidden", v !== "chart");
+  $("chartTable").classList.toggle("hidden", v !== "table");
 }
 
 function render(d) {
-  $("app").classList.remove("skeleton");
-  if (d.user && d.user.first_name) $("hello").textContent = `Salut ${d.user.first_name} 👋`;
-  $("status").classList.toggle("paused", d.paused);
-  $("statusTxt").textContent = d.paused ? "En pause" : `En ligne · ${d.uptime}`;
-  $("pauseBtn").textContent = d.paused ? "▶️" : "⏸";
+  const now = new Date();
+  $("subtitle").textContent = d.user && d.user.first_name ? `Bonjour ${d.user.first_name} · actif depuis ${d.uptime}` : `Studio · actif depuis ${d.uptime}`;
+  $("systemBadge").innerHTML = d.paused ? badge("En pause", "warning") : badge("Actif", "success", true);
+  const pb = $("pauseBtn");
+  pb.innerHTML = icon(d.paused ? "play" : "pause");
+  pb.setAttribute("aria-label", d.paused ? "Relancer le système" : "Mettre le système en pause");
+  pb.title = d.paused ? "Relancer" : "Pause globale";
+
   $("kGen").textContent = d.today.generated;
   $("kPub").textContent = d.today.published;
-  $("kPubL").textContent = `publiées · YT ${d.today.youtube} · TT ${d.today.tiktok}`;
+  $("kPubSub").textContent = `YouTube ${d.today.youtube} · TikTok ${d.today.tiktok}`;
   $("kAppr").textContent = d.pending_approval;
+  $("kApprSub").textContent = d.pending_approval ? "en attente de toi" : "rien en attente";
   $("kFail").textContent = d.today.failed;
-  chart(d.series);
+  $("kFailSub").textContent = d.today.failed ? "à vérifier" : "aucun";
+  $("kFailSub").className = `text-xs mt-1 ${d.today.failed ? "text-red-600 dark:text-red-400" : "text-muted"}`;
 
+  drawChart(d.series);
   const q = d.quota;
-  $("quota").innerHTML = q && q.limit ? `<div class="row"><span>🔋 ElevenLabs ${esc(q.tier || "")}</span>
-    <span>${(q.limit - q.used).toLocaleString("fr")} car. restants</span></div>
-    <div class="bar"><div style="width:${Math.max(2, 100 - (q.used / q.limit) * 100)}%"></div></div>` : "";
+  $("quota").classList.toggle("hidden", !(q && q.limit));
+  if (q && q.limit) {
+    const left = Math.max(0, q.limit - q.used);
+    $("quotaTxt").textContent = `${nf.format(left)} restants sur ${nf.format(q.limit)}`;
+    $("quotaBar").style.width = `${Math.max(1, (left / q.limit) * 100)}%`;
+  }
 
-  // Approvals
-  $("apprSec").style.display = d.approvals.length ? "" : "none";
+  // À valider
+  $("apprSec").classList.toggle("hidden", !d.approvals.length);
   $("apprCount").textContent = d.approvals.length ? `${d.approvals.length} en attente` : "";
   $("approvals").innerHTML = d.approvals.map((v) => `
-    <div class="appr">
-      <div class="thumb" data-play="${v.id}"><img loading="lazy" src="${media("thumb", v.id)}" onerror="this.remove()">
-        <div class="play">▶</div><div class="dur">${mmss(v.duration)}</div></div>
-      <div class="meta"><div class="t">${esc(v.title)}</div>
-        <div class="c">${esc(v.channel)}${v.part ? " · P" + esc(v.part) : ""}</div>
-        <div class="acts">
-          <button class="btn ok" data-act="/api/videos/${v.id}/approve" data-msg="✅ Validée">✅</button>
-          <button class="btn primary" data-act="/api/videos/${v.id}/publish" data-msg="🚀 Publication lancée">🚀</button>
-          <button class="btn danger" data-act="/api/videos/${v.id}/discard" data-msg="🗑 Jetée">🗑</button>
-        </div></div>
+    <article class="snap-start shrink-0 w-44 rounded-lg border border-default bg-card overflow-hidden">
+      <button type="button" class="relative block w-full aspect-[9/16] bg-muted" data-play="${v.id}" aria-label="Lire l'aperçu de ${esc(v.title)}">
+        <img loading="lazy" src="${media("thumb", v.id)}" alt="" class="w-full h-full object-cover" onerror="this.remove()">
+        <span class="absolute inset-0 flex items-center justify-center">
+          <span class="w-11 h-11 rounded-full bg-[hsl(var(--background))]/85 backdrop-blur flex items-center justify-center">${icon("play", "w-4 h-4 ml-0.5")}</span>
+        </span>
+        <span class="absolute right-2 bottom-2 text-xs font-medium px-2 py-0.5 rounded bg-[hsl(var(--background))]/85">${mmss(v.duration)}</span>
+      </button>
+      <div class="p-3">
+        <h3 class="text-sm font-medium leading-snug line-clamp-2">${esc(v.title)}</h3>
+        <p class="text-xs text-muted mt-1 truncate">${esc(v.channel)}${v.part ? " · partie " + esc(v.part) : ""}</p>
+        <button type="button" class="${BTN_PRIMARY} w-full mt-3" data-act="/api/videos/${v.id}/publish" data-msg="Publication lancée">${icon("send")}Publier</button>
+        <div class="flex gap-2 mt-2">
+          <button type="button" class="${BTN_SECONDARY} flex-1" data-act="/api/videos/${v.id}/approve" data-msg="Validée — publiée au prochain créneau">Valider</button>
+          <button type="button" class="${BTN_ICON}" data-act="/api/videos/${v.id}/discard" data-msg="Vidéo jetée" aria-label="Jeter la vidéo">${icon("trash")}</button>
+        </div>
+      </div>
+    </article>`).join("");
+
+  // Chaînes
+  const active = d.channels.filter((c) => c.active).length;
+  $("chCount").textContent = `${active} active${active > 1 ? "s" : ""} sur ${d.channels.length}`;
+  $("channels").innerHTML = d.channels.length ? d.channels.map((c) => {
+    const meta = [`${c.ready} prête${c.ready > 1 ? "s" : ""}`];
+    if (c.pending) meta.push(`${c.pending} à valider`);
+    if (c.rendering) meta.push(`${c.rendering} en fabrication`);
+    meta.push(c.active ? `prochain créneau ${c.next_slot}` : "en pause");
+    meta.push(`${c.per_day}/jour`);
+    const plat = (name, p) => p.enabled && p.linked
+      ? `<span class="inline-flex items-center gap-1.5 text-xs"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${name}</span>`
+      : `<span class="inline-flex items-center gap-1.5 text-xs text-muted"><span class="w-1.5 h-1.5 rounded-full border border-current"></span>${name} ${p.enabled ? "non lié" : "désactivé"}</span>`;
+    return `
+    <article class="p-4">
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h3 class="font-medium truncate">${esc(c.name)}</h3>
+            <span class="text-xs px-2 py-0.5 rounded bg-muted text-muted uppercase tracking-wide">${esc(c.language)}</span>
+          </div>
+          <p class="text-sm text-muted mt-1">${esc(meta.join(" · "))}</p>
+          <div class="flex gap-4 mt-2">${plat("YouTube", c.youtube)}${plat("TikTok", c.tiktok)}</div>
+        </div>
+        <label class="switch mt-0.5" title="${c.active ? "Mettre en pause" : "Activer"}">
+          <input type="checkbox" ${c.active ? "checked" : ""} data-toggle="${c.id}" aria-label="${c.active ? "Mettre en pause" : "Activer"} ${esc(c.name)}">
+          <span class="track"></span><span class="thumb"></span>
+        </label>
+      </div>
+      <div class="flex gap-2 mt-4">
+        <button type="button" class="${BTN_SECONDARY}" data-act="/api/channels/${c.id}/generate" data-msg="Génération lancée — suivi dans Telegram">${icon("zap")}Générer</button>
+        <button type="button" class="${BTN_SECONDARY}" data-act="/api/channels/${c.id}/publish-next" data-msg="Publication lancée">${icon("send")}Publier la suivante</button>
+      </div>
+    </article>`;
+  }).join("") : `<div class="p-8 text-center"><p class="text-sm text-muted">Aucune chaîne pour l'instant. Crée la première depuis le bot avec /new.</p></div>`;
+
+  // En cours
+  $("jobsSec").classList.toggle("hidden", !d.jobs.length);
+  $("jobCount").textContent = d.jobs.length ? `${d.jobs.length} tâche${d.jobs.length > 1 ? "s" : ""}` : "";
+  $("jobs").innerHTML = d.jobs.map((j) => `
+    <div class="flex items-center justify-between gap-4 px-4 py-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="w-2 h-2 rounded-full shrink-0 ${j.status === "running" ? "bg-emerald-500 animate-pulse-slow" : "bg-[hsl(var(--border))]"}"></span>
+        <span class="text-sm truncate">${esc(j.label)}</span>
+      </div>
+      <span class="text-xs text-muted shrink-0">${j.status === "running" ? mmss(j.since) : "en attente"}</span>
     </div>`).join("");
 
-  // Channels
-  $("chCount").textContent = `${d.channels.filter((c) => c.active).length} actives / ${d.channels.length}`;
-  $("channels").innerHTML = d.channels.length ? d.channels.map((c) => `
-    <div class="chc">
-      <div class="h"><span style="font-size:20px">${esc(c.flag)}</span><div class="name">${esc(c.name)}</div>
-        <label class="switch"><input type="checkbox" ${c.active ? "checked" : ""} data-toggle="${c.id}"><span></span></label></div>
-      <div class="chips">
-        <span class="chip">🟢 ${c.ready} prête${c.ready > 1 ? "s" : ""}</span>
-        ${c.pending ? `<span class="chip">🟡 ${c.pending} à valider</span>` : ""}
-        ${c.rendering ? `<span class="chip">⚙️ ${c.rendering} en cours</span>` : ""}
-        <span class="chip">⏰ ${c.active ? esc(c.next_slot) : "inactive"}</span>
-        <span class="chip">📅 ${c.per_day}/jour</span>
-        <span class="chip yt ${c.youtube.linked && c.youtube.enabled ? "on" : "off"}">▶ YouTube</span>
-        <span class="chip tt ${c.tiktok.linked && c.tiktok.enabled ? "on" : "off"}">♪ TikTok</span>
+  // Dernières vidéos
+  $("recent").innerHTML = d.recent.length ? d.recent.map((v) => {
+    const links = v.pubs.map((p) => {
+      const name = p.platform === "youtube" ? "YouTube" : "TikTok";
+      if (p.url) return `<a href="${esc(p.url)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-xs text-muted hover:text-[hsl(var(--foreground))] transition-colors">${name}${icon("external", "w-3 h-3")}</a>`;
+      if (p.status === "failed") return `<span class="text-xs text-red-600 dark:text-red-400" title="${esc(p.error)}">${name} : échec</span>`;
+      if (p.status === "draft") return `<span class="text-xs text-muted">${name} : brouillon</span>`;
+      return `<span class="text-xs text-muted">${name}</span>`;
+    }).join('<span class="text-xs text-muted">·</span>');
+    return `
+    <div class="flex items-center gap-3 px-4 py-3">
+      <button type="button" class="w-9 h-16 rounded bg-muted overflow-hidden shrink-0" ${v.has_file ? `data-play="${v.id}" aria-label="Lire ${esc(v.title)}"` : 'tabindex="-1" aria-hidden="true"'}>
+        ${v.has_thumb ? `<img loading="lazy" src="${media("thumb", v.id)}" alt="" class="w-full h-full object-cover" onerror="this.remove()">` : ""}
+      </button>
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-medium truncate">${esc(v.title)}</p>
+        <p class="text-xs text-muted truncate mt-0.5">${esc(v.channel)}${v.part ? " · partie " + esc(v.part) : ""} · ${esc(v.created)}</p>
+        ${links ? `<div class="flex items-center gap-2 mt-1">${links}</div>` : ""}
       </div>
-      <div class="acts">
-        <button class="btn primary" data-act="/api/channels/${c.id}/generate" data-msg="⚡ Génération lancée — suis-la dans Telegram">⚡ Générer</button>
-        <button class="btn" data-act="/api/channels/${c.id}/publish-next" data-msg="🚀 Publication lancée">🚀 Publier la suivante</button>
-      </div>
-    </div>`).join("") : `<div class="empty">Aucune chaîne. Crée-la depuis le bot avec /new ✨</div>`;
+      <div class="shrink-0">${statusBadge(v.status)}</div>
+    </div>`;
+  }).join("") : `<div class="p-8 text-center"><p class="text-sm text-muted">Les vidéos générées apparaîtront ici.</p></div>`;
 
-  // Jobs
-  $("jobsSec").style.display = d.jobs.length ? "" : "none";
-  $("jobCount").textContent = d.jobs.length ? `${d.jobs.length} tâche${d.jobs.length > 1 ? "s" : ""}` : "";
-  $("jobs").innerHTML = d.jobs.map((j) => `<div class="job">${j.status === "running" ? '<div class="spin"></div>' : "⏳"}
-      <div style="flex:1">${esc(j.label)}</div><span style="color:var(--muted);font-size:12px">${mmss(j.since)}</span></div>`).join("");
-
-  // Recent
-  $("recent").innerHTML = d.recent.length ? d.recent.map((v) => `
-    <div class="row">
-      <div class="mini" ${v.has_file ? `data-play="${v.id}"` : ""}>${v.has_thumb ? `<img loading="lazy" src="${media("thumb", v.id)}" onerror="this.remove()">` : ""}</div>
-      <div class="b"><div class="t">${esc(v.title)}</div>
-        <div class="s">${esc(v.channel)}${v.part ? " · P" + esc(v.part) : ""} · ${esc(v.created)}</div>
-        <div class="links"><span class="st ${esc(v.status)}">${esc(STATUS[v.status] || v.status)}</span>
-          ${v.pubs.map((p) => p.url ? `<a href="${esc(p.url)}" target="_blank">${p.platform === "youtube" ? "▶ YouTube" : "♪ TikTok"}</a>`
-            : `<span class="st ${p.status === "failed" ? "failed" : "ready"}" title="${esc(p.error)}">${p.platform === "youtube" ? "YT" : "TT"} ${p.status === "failed" ? "✕" : p.status === "draft" ? "brouillon" : "✓"}</span>`).join("")}
-        </div></div>
-    </div>`).join("") : `<div class="empty">Les vidéos générées apparaîtront ici.</div>`;
+  $("synced").textContent = `Synchronisé à ${now.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 async function load() {
   try { render(await api("/api/overview")); }
-  catch (e) { toast("⚠️ " + e.message); }
+  catch (e) { toast(e.message); }
+}
+
+function openPlayer(id) {
+  haptic();
+  const v = $("player");
+  v.src = media("video", id);
+  $("modal").classList.remove("hidden");
+  $("modal").classList.add("flex");
+  v.play().catch(() => {});
+}
+function closePlayer() {
+  $("player").pause();
+  $("modal").classList.add("hidden");
+  $("modal").classList.remove("flex");
 }
 
 document.addEventListener("click", (ev) => {
   const a = ev.target.closest("[data-act]");
   if (a) { a.disabled = true; act(a.dataset.act, a.dataset.msg); return; }
   const p = ev.target.closest("[data-play]");
-  if (p) { haptic(); const v = $("player"); v.src = media("video", p.dataset.play); $("modal").classList.add("on"); v.play().catch(() => {}); }
+  if (p) { openPlayer(p.dataset.play); return; }
+  const vb = ev.target.closest(".view-btn");
+  if (vb) setView(vb.dataset.view);
 });
 document.addEventListener("change", (ev) => {
   const t = ev.target.closest("[data-toggle]");
-  if (t) act(`/api/channels/${t.dataset.toggle}/toggle`, t.checked ? "▶️ Chaîne activée" : "⏸ Chaîne en pause");
+  if (t) act(`/api/channels/${t.dataset.toggle}/toggle`, t.checked ? "Chaîne activée" : "Chaîne en pause");
 });
-$("modal").addEventListener("click", (e) => { if (e.target.id === "modal") { $("player").pause(); $("modal").classList.remove("on"); } });
+$("closeModal").innerHTML = icon("x");
+$("closeModal").addEventListener("click", closePlayer);
+$("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closePlayer(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePlayer(); });
 $("pauseBtn").addEventListener("click", () => act("/api/system/pause", "Système mis à jour"));
+window.addEventListener("resize", () => { if (lastSeries) drawChart(lastSeries); });
+setView("chart");
 
 if (!INIT) {
-  document.body.innerHTML = `<div class="gate"><div><b>🎬 StoryForge</b>Ouvre ce dashboard depuis le bot Telegram (bouton « Dashboard »).</div></div>`;
+  document.body.innerHTML = `
+    <main class="min-h-screen flex items-center justify-center px-5">
+      <div class="max-w-sm p-6 rounded-lg border border-default bg-card text-center">
+        <div class="w-10 h-10 rounded-full bg-muted mx-auto mb-4 flex items-center justify-center"><span class="text-xs font-semibold">SF</span></div>
+        <h1 class="font-semibold tracking-tight mb-2">StoryForge</h1>
+        <p class="text-sm text-muted leading-relaxed">Ouvre ce dashboard depuis le bot Telegram, avec le bouton « Dashboard ».</p>
+      </div>
+    </main>`;
 } else {
   load();
   setInterval(load, 15000);

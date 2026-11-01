@@ -27,7 +27,7 @@ from ..publishers import PublisherError
 from ..video.background import VIDEO_EXTS
 from . import screens
 from .fields import FIELD_MAP
-from .ui import SEP, esc, kb
+from .ui import esc, kb
 
 if TYPE_CHECKING:
     from ..core import Services
@@ -35,31 +35,30 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
-CANCEL = [("❌ Annuler", "x")]
+CANCEL = [("Annuler", "x")]
 
-HELP = f"""🎬 <b>STORYFORGE</b> · aide
-{SEP}
-Usine à vidéos <i>storytime</i> : histoire ChatGPT → voix ElevenLabs → fond vidéo tiré au hasard
-(séquence aléatoire de la bonne durée) → sous-titres mot à mot → publication YouTube Shorts & TikTok.
+HELP = """<b>Aide</b>
+
+StoryForge fabrique des vidéos <i>storytime</i> : histoire écrite par ChatGPT, voix ElevenLabs, fond tiré au hasard dans ta banque (séquence aléatoire de la bonne durée), sous-titres mot à mot, puis publication sur YouTube Shorts et TikTok.
 
 <b>Commandes</b>
-/start — dashboard
-/channels — tes chaînes (instances)
-/new — créer une chaîne
-/generate — générer une vidéo maintenant
-/queue — file d'attente & planning
-/stats — statistiques
-/bank — banque de vidéos de fond
-/settings — réglages système
-/log — journal d'activité
-/cancel — annuler une saisie
-/myid — ton ID Telegram
+/start  Dashboard
+/channels  Chaînes
+/new  Nouvelle chaîne
+/generate  Générer maintenant
+/queue  File d'attente et planning
+/stats  Statistiques
+/bank  Banque vidéo
+/settings  Réglages système
+/log  Journal
+/cancel  Annuler une saisie
+/myid  Ton identifiant Telegram
 
-<b>Démarrage rapide</b>
-1. 🎞 Ajoute des vidéos de fond (longues : 20-60 min idéal)
-2. ➕ Crée une chaîne, choisis langue, formats et voix
-3. 🔗 Lie YouTube et/ou TikTok
-4. ▶️ Active-la : la réserve se remplit et les créneaux publient tout seuls
+<b>Pour commencer</b>
+1. Ajoute des vidéos de fond, idéalement longues (20 à 60 min).
+2. Crée une chaîne : langue, formats, voix.
+3. Lie YouTube et/ou TikTok.
+4. Active-la : la réserve se remplit et les créneaux publient seuls.
 """
 
 
@@ -77,13 +76,13 @@ async def guard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if user and user.id in admins:
         return True
     if update.callback_query:
-        await update.callback_query.answer("⛔ Accès refusé", show_alert=True)
+        await update.callback_query.answer("Accès refusé", show_alert=True)
     elif update.effective_message and user:
         if admins:
-            await update.effective_message.reply_text("⛔ Accès refusé.")
+            await update.effective_message.reply_text("Accès refusé.")
         else:
             await update.effective_message.reply_html(
-                f"👋 Ton ID Telegram est <code>{user.id}</code>.\n"
+                f"Ton identifiant Telegram est <code>{user.id}</code>.\n"
                 "Ajoute-le dans <code>TELEGRAM_ADMIN_IDS</code> du fichier <code>.env</code> puis redémarre le bot."
             )
     return False
@@ -121,7 +120,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
-    await update.effective_message.reply_html(HELP, reply_markup=kb([[("🏠 Dashboard", "h")]]))
+    await update.effective_message.reply_html(HELP, reply_markup=kb([[("Ouvrir le dashboard", "h")]]))
 
 
 async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -131,7 +130,7 @@ async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("await", None)
-    await update.effective_message.reply_text("❌ Saisie annulée.", reply_markup=kb([[("🏠 Dashboard", "h")]]))
+    await update.effective_message.reply_text("Saisie annulée.", reply_markup=kb([[("Ouvrir le dashboard", "h")]]))
 
 
 def screen_cmd(builder):
@@ -146,8 +145,8 @@ def screen_cmd(builder):
 async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
-    await prompt(update, context, "➕ <b>Nouvelle chaîne</b>\n" + SEP + "\nComment s'appelle cette chaîne ?\n"
-                 "<i>Ex : Histoires Folles FR, Reddit Stories US…</i>", {"kind": "new_channel"})
+    await prompt(update, context, "<b>Nouvelle chaîne</b>\n\nComment s'appelle cette chaîne ?\n"
+                 "<i>Exemples : Histoires Folles, Reddit Stories US</i>", {"kind": "new_channel"})
 
 
 # ---------------------------------------------------------------------------- génération
@@ -167,7 +166,7 @@ async def start_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, c
         await q.answer("Chaîne introuvable", show_alert=True)
         return
     ahead = svc.jobs.count(kind="generate")
-    await q.answer("⚡ Génération lancée" + (f" (après {ahead} tâche(s))" if ahead else ""))
+    await q.answer("Génération lancée" + (f", après {ahead} tâche(s)" if ahead else ""))
     progress = await notifier_of(context).progress(f"Génération · {ch.name}", chat_id=update.effective_chat.id)
     svc.enqueue_generate(cid, progress=progress, label=f"Manuel · {ch.name}")
 
@@ -202,7 +201,7 @@ async def video_action(update: Update, context: ContextTypes.DEFAULT_TYPE, actio
             await q.answer("Déjà traitée")
         else:
             await svc.approve(vid)
-            await q.answer("✅ Validée — publiée au prochain créneau")
+            await q.answer("Validée. Publication au prochain créneau.")
         await refresh_video(update, context, vid)
     elif action == "vn":
         if v.status in (VideoStatus.PUBLISHING, VideoStatus.RENDERING, VideoStatus.DISCARDED):
@@ -216,13 +215,13 @@ async def video_action(update: Update, context: ContextTypes.DEFAULT_TYPE, actio
             await q.answer("Aucune plateforme liée/activée pour cette chaîne", show_alert=True)
             return
         job = svc.enqueue_publish(vid, v.channel_id)
-        await q.answer("🚀 Publication lancée" if job else "Publication déjà en cours")
+        await q.answer("Publication lancée" if job else "Publication déjà en cours")
         if v.status == VideoStatus.PENDING_APPROVAL:
             await svc.approve(vid)
         await refresh_video(update, context, vid)
     elif action == "vx":
         await svc.discard(vid)
-        await q.answer("🗑 Vidéo jetée")
+        await q.answer("Vidéo jetée")
         await refresh_video(update, context, vid)
     elif action == "vr":
         missing = _missing_prereqs(svc)
@@ -233,7 +232,7 @@ async def video_action(update: Update, context: ContextTypes.DEFAULT_TYPE, actio
         await refresh_video(update, context, vid)
         await start_generation(update, context, v.channel_id)
     elif action == "vf":
-        await q.answer("📤 Envoi de l'aperçu…")
+        await q.answer("Envoi de l'aperçu…")
         await notifier_of(context).send_video_message(update.effective_chat.id, vid, nav=True)
     elif action == "vt":
         await q.answer()
@@ -255,28 +254,28 @@ async def link_account(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: 
                if platform == "youtube" else
                "Crée une app sur developers.tiktok.com (Login Kit + Content Posting API), puis renseigne "
                "<code>TIKTOK_CLIENT_KEY</code>, <code>TIKTOK_CLIENT_SECRET</code> et <code>TIKTOK_REDIRECT_URI</code>.")
-        await show(update, context, (f"⚠️ <b>Configuration manquante</b>\n{SEP}\n{esc(exc)}\n\n{doc}",
-                                     kb([[("⬅️ Chaîne", f"cv:{cid}")]])))
+        await show(update, context, (f"<b>Configuration manquante</b>\n\n{esc(exc)}\n\n{doc}",
+                                     kb([[("← Chaîne", f"cv:{cid}")]])))
         return
     await q.answer()
     name = "YouTube" if platform == "youtube" else "TikTok"
     auto = platform == "youtube" and bool(s.webapp_url)
     steps = [
-        f"🔗 <b>Lier {name}</b> · {esc(ch.name)}",
-        SEP,
-        f"1️⃣ Ouvre le lien ci-dessous et connecte le compte {name} de cette chaîne.",
+        f"<b>Lier {name}</b> · {esc(ch.name)}",
+        "",
+        f"1. Ouvre le lien et connecte le compte {name} de cette chaîne.",
     ]
     if auto:
-        steps.append("2️⃣ C'est tout : la liaison se fait automatiquement, je te préviens ici. ✨")
+        steps.append("2. C'est tout : la liaison est automatique, je te préviens ici.")
     else:
         steps += [
-            "2️⃣ Après l'autorisation, tu arrives sur une page (parfois une erreur « site inaccessible » : c'est normal).",
-            "3️⃣ <b>Copie l'adresse complète</b> de cette page et <b>colle-la ici</b>.",
+            "2. Après l'autorisation, une page s'ouvre. <i>Une erreur « site inaccessible » est normale.</i>",
+            "3. Copie l'adresse complète de cette page et colle-la ici.",
         ]
     linked = ch.youtube_linked if platform == "youtube" else ch.tiktok_linked
-    rows = [[(f"🔐 Autoriser {name}", url)]]
+    rows = [[(f"Autoriser {name}", url)]]
     if linked:
-        rows.append([(f"🔌 Délier {name}", f"cu:{cid}:{platform}")])
+        rows.append([(f"Délier {name}", f"cu:{cid}:{platform}")])
     rows.append(CANCEL)
     context.user_data["await"] = {"kind": "oauth", "cid": cid, "platform": platform}
     await show(update, context, ("\n".join(steps), kb(rows)))
@@ -285,32 +284,37 @@ async def link_account(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: 
 # ---------------------------------------------------------------------------- tests
 async def test_apis(svc: Services) -> screens.Screen:
     s = svc.settings
-    lines = ["🩺 <b>Diagnostic</b>", SEP]
+    lines = ["<b>Diagnostic</b>", ""]
+
+    def check(ok: bool, label: str, detail: str) -> None:
+        lines.append(f"{'✓' if ok else '✕'}  {label}  <i>{esc(detail)}</i>")
+
     try:
         await svc.pipeline.stories.client.models.retrieve(s.openai_model)
-        lines.append(f"✅ OpenAI · modèle <code>{esc(s.openai_model)}</code> accessible")
+        check(True, "OpenAI", f"modèle {s.openai_model} accessible")
     except Exception as exc:
-        lines.append(f"❌ OpenAI · {esc(str(exc)[:150])}")
+        check(False, "OpenAI", str(exc)[:150])
     try:
         sub = await svc.pipeline.tts.subscription()
-        lines.append(f"✅ ElevenLabs · forfait {esc(sub.get('tier', '?'))} · "
-                     f"{sub.get('character_count', 0)}/{sub.get('character_limit', 0)} car.")
+        check(True, "ElevenLabs", f"forfait {sub.get('tier', '?')}, "
+              f"{sub.get('character_count', 0)} sur {sub.get('character_limit', 0)} caractères utilisés")
     except Exception as exc:
-        lines.append(f"❌ ElevenLabs · {esc(str(exc)[:150])}")
+        check(False, "ElevenLabs", str(exc)[:150])
     proc = await asyncio.create_subprocess_exec(s.ffmpeg_bin, "-version", stdout=asyncio.subprocess.PIPE,
                                                 stderr=asyncio.subprocess.PIPE)
     out, _ = await proc.communicate()
-    lines.append(("✅ " + esc(out.decode().splitlines()[0][:60])) if proc.returncode == 0 else "❌ ffmpeg introuvable")
+    check(proc.returncode == 0, "ffmpeg", out.decode().splitlines()[0][:60] if proc.returncode == 0 else "introuvable")
     fonts = list(Path(s.fonts_dir).glob("*.ttf"))
-    lines.append(f"{'✅' if fonts else '⚠️'} Polices : {len(fonts)} fichier(s)")
+    check(bool(fonts), "Polices", f"{len(fonts)} fichier(s)")
     cats = svc.pipeline.bank.categories()
-    lines.append(f"{'✅' if cats else '❌'} Fonds vidéo : {sum(len(v) for v in cats.values())} fichier(s)")
-    lines.append(f"{'✅' if s.google_client_secrets_file.exists() else '⚠️'} OAuth Google : "
-                 f"{'présent' if s.google_client_secrets_file.exists() else 'secrets/google_client_secret.json manquant'}")
-    tt_ok = s.tiktok_client_key and s.tiktok_client_secret and s.tiktok_redirect_uri
-    lines.append(f"{'✅' if tt_ok else '⚠️'} TikTok : {'configuré' if tt_ok else 'clés manquantes'}")
-    lines.append(f"{'✅' if shutil.which('yt-dlp') else '▫️'} yt-dlp (ajout de fonds par lien)")
-    return "\n".join(lines), kb([[("🔄 Relancer", "stt"), ("⬅️ Réglages", "set")]])
+    check(bool(cats), "Vidéos de fond", f"{sum(len(v) for v in cats.values())} fichier(s)")
+    has_google = s.google_client_secrets_file.exists()
+    check(has_google, "OAuth Google", "présent" if has_google else "secrets/google_client_secret.json manquant")
+    tt_ok = bool(s.tiktok_client_key and s.tiktok_client_secret and s.tiktok_redirect_uri)
+    check(tt_ok, "TikTok", "configuré" if tt_ok else "clés manquantes")
+    check(bool(shutil.which("yt-dlp")), "yt-dlp", "ajout de fonds par lien")
+    return "\n".join(lines), kb([[("Relancer", "stt"), ("← Réglages", "set")]])
+
 
 
 # ---------------------------------------------------------------------------- routeur boutons
@@ -343,19 +347,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await show(update, context, await screens.home(svc))
     elif head == "new":
         await q.answer()
-        await prompt(update, context, "➕ <b>Nouvelle chaîne</b>\n" + SEP + "\nComment s'appelle cette chaîne ?\n"
-                     "<i>Ex : Histoires Folles FR, Reddit Stories US…</i>", {"kind": "new_channel"})
+        await prompt(update, context, "<b>Nouvelle chaîne</b>\n\nComment s'appelle cette chaîne ?\n"
+                     "<i>Exemples : Histoires Folles, Reddit Stories US</i>", {"kind": "new_channel"})
     elif head == "cv":
         await q.answer()
         await show(update, context, await screens.channel_view(svc, cid))
     elif head == "ct":
         ch = await svc.get_channel(cid)
         ch = await svc.update_channel(cid, active=not ch.active)
-        await db.log_event(f"{'▶️' if ch.active else '⏸'} {ch.name} {'activée' if ch.active else 'en pause'}", "info", cid)
+        await db.log_event(f"{ch.name} {'activée' if ch.active else 'mise en pause'}", "info", cid)
         if ch.active and not ch.platforms():
-            await q.answer("▶️ Activée — pense à lier YouTube/TikTok 🔗 pour publier", show_alert=True)
+            await q.answer("Chaîne activée. Lie YouTube ou TikTok pour publier.", show_alert=True)
         else:
-            await q.answer("▶️ Chaîne activée" if ch.active else "⏸ Chaîne en pause")
+            await q.answer("Chaîne activée" if ch.active else "Chaîne en pause")
         if ch.active and not _missing_prereqs(svc):
             asyncio.create_task(svc.refill())
         await show(update, context, await screens.channel_view(svc, cid))
@@ -370,7 +374,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await q.answer("Aucune plateforme liée/activée", show_alert=True)
         else:
             svc.enqueue_publish(v.id, cid)
-            await q.answer(f"🚀 Publication de #{v.id} lancée")
+            await q.answer(f"Publication de #{v.id} lancée")
     elif head == "ce":
         await q.answer()
         await show(update, context, await screens.channel_edit(svc, cid))
@@ -383,7 +387,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         f = FIELD_MAP[parts[2]]
         label, value = f.options[int(parts[3])]
         await svc.update_channel(cid, **f.updates_for(value))
-        await q.answer(f"✅ {f.label} : {label}")
+        await q.answer(f"{f.label} : {label}")
         await show(update, context, await screens.channel_group(svc, cid, f.group))
     elif head == "cm":
         await on_multi(update, context, cid, parts[2], int(parts[3]))
@@ -395,11 +399,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         voices = await _voices(context)
         v = voices[int(parts[2])]
         await svc.update_channel(cid, voice_id=v["voice_id"], voice_name=v["name"])
-        await q.answer(f"🗣 Voix : {v['name']}")
+        await q.answer(f"Voix : {v['name']}")
         await show(update, context, await screens.channel_group(svc, cid, "voice"))
     elif head == "vid":
         await q.answer()
-        await prompt(update, context, "⌨️ Envoie l'<b>ID de voix</b> ElevenLabs (onglet Voices → ID).",
+        await prompt(update, context, "<b>ID de voix</b>\n\nEnvoie l'identifiant de la voix ElevenLabs.\n<i>Dans ElevenLabs : Voices, puis l'icône ID.</i>",
                      {"kind": "voice_id", "cid": cid})
     elif head == "cy":
         await link_account(update, context, cid, "youtube")
@@ -411,15 +415,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                   else {"tiktok_credentials": None, "tiktok_account": ""})
         await svc.update_channel(cid, **fields)
         context.user_data.pop("await", None)
-        await q.answer("🔌 Compte délié")
+        await q.answer("Compte délié")
         await show(update, context, await screens.channel_view(svc, cid))
     elif head == "cd":
         ch = await svc.get_channel(cid)
         await q.answer()
         await show(update, context, (
-            f"🗑 <b>Supprimer « {esc(ch.name)} » ?</b>\n{SEP}\nHistoires, vidéos et historique de cette chaîne "
+            f"<b>Supprimer « {esc(ch.name)} » ?</b>\n\nHistoires, vidéos et historique de cette chaîne "
             "seront effacés de la base. Les comptes YouTube/TikTok ne sont pas touchés.",
-            kb([[("⚠️ Oui, supprimer", f"cD:{cid}"), ("Annuler", f"cv:{cid}")]]),
+            kb([[("Supprimer définitivement", f"cD:{cid}"), ("Annuler", f"cv:{cid}")]]),
         ))
     elif head == "cD":
         await svc.delete_channel(cid)
@@ -444,21 +448,21 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await _ask_bg(update, context, cats[idx])
     elif head == "bkn":
         await q.answer()
-        await prompt(update, context, "✏️ Nom de la nouvelle catégorie ?\n<i>Ex : cooking, minecraft, satisfying…</i>",
+        await prompt(update, context, "<b>Nouvelle catégorie</b>\n\nQuel nom ?\n<i>Exemples : cooking, minecraft, satisfying</i>",
                      {"kind": "bg_newcat"})
     elif head == "sp":
         paused = await svc.is_paused()
         await svc.set_paused(not paused)
-        await q.answer("▶️ Système relancé" if paused else "⏸ Système en pause")
-        from_settings = q.message is not None and (q.message.text or "").startswith("⚙️ Réglages")
+        await q.answer("Système relancé" if paused else "Système en pause")
+        from_settings = q.message is not None and (q.message.text or "").startswith("Réglages système")
         await show(update, context, await (screens.settings_screen(svc) if from_settings else screens.home(svc)))
     elif head == "slv":
         live = bool(await db.kv_get("live_auto", False))
         await db.kv_set("live_auto", not live)
-        await q.answer("📡 Suivi live " + ("désactivé" if live else "activé"))
+        await q.answer("Suivi en direct " + ("désactivé" if live else "activé"))
         await show(update, context, await screens.settings_screen(svc))
     elif head == "stt":
-        await q.answer("🩺 Tests en cours…")
+        await q.answer("Diagnostic en cours…")
         await show(update, context, await test_apis(svc))
     else:
         await q.answer()
@@ -484,7 +488,7 @@ async def on_field(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: int,
     if f.kind == "toggle":
         new = not getattr(ch, key)
         await svc.update_channel(cid, **{key: new})
-        await q.answer(f"{f.label} : {'✅ ON' if new else '❌ OFF'}")
+        await q.answer(f"{f.label} : {'activé' if new else 'désactivé'}")
         await show(update, context, await screens.channel_group(svc, cid, f.group))
     elif f.kind in ("choice", "multi"):
         await q.answer()
@@ -503,7 +507,7 @@ async def on_field(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: int,
         await q.answer()
         current = f.value_text(ch)
         await prompt(update, context,
-                     f"✏️ <b>{esc(f.label)}</b>\nValeur actuelle : <b>{esc(current)}</b>\n\n{f.hint or 'Envoie la nouvelle valeur.'}",
+                     f"<b>{esc(f.label)}</b> · {esc(ch.name)}\n\nValeur actuelle : <b>{esc(current)}</b>\n\n{f.hint or 'Envoie la nouvelle valeur.'}",
                      {"kind": "field", "cid": cid, "key": key})
 
 
@@ -536,10 +540,9 @@ async def on_multi(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: int,
 async def _ask_bg(update: Update, context: ContextTypes.DEFAULT_TYPE, category: str) -> None:
     await prompt(
         update, context,
-        f"🎞 Catégorie <b>{esc(category)}</b>\n{SEP}\nEnvoie :\n"
-        "• une <b>vidéo</b> ou un fichier (≤ 20 Mo, limite des bots Telegram)\n"
-        "• ou un <b>lien</b> (YouTube…) téléchargé via yt-dlp\n\n"
-        "<i>Les longues vidéos (20-60 min) offrent plus de variété. Utilise des contenus dont tu as les droits.</i>",
+        f"<b>Ajouter une vidéo</b> · {esc(category)}\n\n"
+        "Envoie une vidéo ou un fichier de 20 Mo maximum (limite des bots Telegram), ou un lien téléchargé avec yt-dlp.\n\n"
+        "<i>Les vidéos longues (20 à 60 min) offrent plus de variété. Utilise des contenus dont tu as les droits.</i>",
         {"kind": "bg_add", "category": category},
     )
 
@@ -557,7 +560,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if "code=" in text and "state=" in text:
             state = {"kind": "oauth"}
         else:
-            await msg.reply_html("Utilise le dashboard 👇", reply_markup=kb([[("🏠 Ouvrir le dashboard", "h")]]))
+            await msg.reply_html("Tout se pilote depuis le dashboard.", reply_markup=kb([[("Ouvrir le dashboard", "h")]]))
             return
 
     kind = state["kind"]
@@ -567,7 +570,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 raise ValueError("Le nom doit faire entre 2 et 60 caractères")
             ch = await svc.create_channel(text)
             context.user_data.pop("await", None)
-            await msg.reply_html(f"✅ Chaîne <b>{esc(ch.name)}</b> créée ! Choisis sa langue :")
+            await msg.reply_html(f"Chaîne <b>{esc(ch.name)}</b> créée. Choisis sa langue.")
             text_, markup = await screens.field_choices(svc, ch.id, "language")
             await show(update, context, (text_, markup), new=True)
         elif kind == "field":
@@ -575,7 +578,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             updates = f.parse(text) if f.parse else {f.key: text}
             await svc.update_channel(state["cid"], **updates)
             context.user_data.pop("await", None)
-            await msg.reply_html(f"✅ <b>{esc(f.label)}</b> mis à jour.")
+            await msg.reply_html(f"<b>{esc(f.label)}</b> mis à jour.")
             await show(update, context, await screens.channel_group(svc, state["cid"], f.group), new=True)
         elif kind == "voice_id":
             if not re.fullmatch(r"[A-Za-z0-9]{10,40}", text):
@@ -586,10 +589,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             context.user_data.pop("await", None)
             await show(update, context, await screens.channel_group(svc, state["cid"], "voice"), new=True)
         elif kind == "oauth":
-            info = await msg.reply_text("🔐 Vérification de l'autorisation…")
+            info = await msg.reply_text("Vérification de l'autorisation…")
             platform, ch, account = await svc.complete_oauth_from_url(text)
             context.user_data.pop("await", None)
-            await info.edit_text(f"✅ {platform.capitalize()} lié à « {ch.name} » : {account}")
+            await info.edit_text(f"✓ {'YouTube' if platform == 'youtube' else 'TikTok'} lié à « {ch.name} » : {account}")
             await show(update, context, await screens.channel_view(svc, ch.id), new=True)
         elif kind == "bg_newcat":
             cat = re.sub(r"[^a-z0-9_-]+", "-", text.lower()).strip("-")[:40]
@@ -605,7 +608,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         else:
             context.user_data.pop("await", None)
     except (ValueError, PublisherError) as exc:
-        await msg.reply_html(f"⚠️ {esc(exc)}\n<i>Réessaie ou /cancel.</i>")
+        await msg.reply_html(f"{esc(exc)}\n<i>Réessaie, ou /cancel pour annuler.</i>")
 
 
 async def on_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -614,8 +617,8 @@ async def on_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = context.user_data.get("await") or {}
     msg = update.effective_message
     if state.get("kind") != "bg_add":
-        await msg.reply_html("Pour ajouter un fond : 🎞 Banque vidéos → ➕ Ajouter.",
-                             reply_markup=kb([[("🎞 Banque vidéos", "bk")]]))
+        await msg.reply_html("Pour ajouter un fond, passe par Banque vidéo, puis Ajouter une vidéo.",
+                             reply_markup=kb([[("Banque vidéo", "bk")]]))
         return
     media = msg.video or msg.document
     if media is None:
@@ -624,20 +627,20 @@ async def on_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if Path(name).suffix.lower() not in VIDEO_EXTS:
         name = Path(name).stem + ".mp4"
     if (media.file_size or 0) > 20 * 1024 * 1024:
-        await msg.reply_html("⚠️ Fichier > 20 Mo : les bots Telegram ne peuvent pas le télécharger.\n"
+        await msg.reply_html("Ce fichier dépasse 20 Mo : les bots Telegram ne peuvent pas le télécharger.\n"
                              "Envoie plutôt un lien, ou dépose-le directement dans <code>data/backgrounds/</code>.")
         return
     svc = svc_of(context)
     dest_dir = svc.settings.backgrounds_dir / state["category"]
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / re.sub(r"[^\w.\- ]+", "_", name)
-    info = await msg.reply_text("📥 Téléchargement…")
+    info = await msg.reply_text("Téléchargement…")
     tg_file = await media.get_file()
     await tg_file.download_to_drive(custom_path=dest)
     context.user_data.pop("await", None)
     dur = await svc.pipeline.bank.duration(dest)
-    await info.edit_text(f"✅ Ajoutée à « {state['category']} » ({int(dur // 60)}:{int(dur % 60):02d})",
-                         reply_markup=kb([[("🎞 Banque vidéos", "bk"), ("➕ Une autre", f"bkc:{_cat_index(svc, state['category'])}")]]))
+    await info.edit_text(f"✓ Ajoutée à « {state['category']} », {int(dur // 60)}:{int(dur % 60):02d}",
+                         reply_markup=kb([[("Banque vidéo", "bk"), ("En ajouter une autre", f"bkc:{_cat_index(svc, state['category'])}")]]))
 
 
 def _cat_index(svc: Services, category: str) -> int:
@@ -649,11 +652,11 @@ async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: st
     svc = svc_of(context)
     exe = shutil.which("yt-dlp")
     if not exe:
-        await context.bot.send_message(chat_id, "❌ yt-dlp n'est pas installé (pip install yt-dlp).")
+        await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : pip install yt-dlp")
         return
     dest_dir = svc.settings.backgrounds_dir / category
     dest_dir.mkdir(parents=True, exist_ok=True)
-    info = await context.bot.send_message(chat_id, f"📥 Téléchargement dans « {category} »… (ça peut prendre quelques minutes)")
+    info = await context.bot.send_message(chat_id, f"Téléchargement dans « {category} »… Cela peut prendre quelques minutes.")
     proc = await asyncio.create_subprocess_exec(
         exe, "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
         "--merge-output-format", "mp4", "--no-playlist", "--restrict-filenames",
@@ -663,13 +666,13 @@ async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: st
     )
     out, err = await proc.communicate()
     if proc.returncode != 0:
-        await info.edit_text(f"❌ Échec du téléchargement : {err.decode('utf-8', 'replace')[-300:]}")
+        await info.edit_text(f"✕ Échec du téléchargement : {err.decode('utf-8', 'replace')[-300:]}")
         return
     path = Path(out.decode().strip().splitlines()[-1]) if out.strip() else None
     dur = await svc.pipeline.bank.duration(path) if path and path.exists() else 0
-    await info.edit_text(f"✅ Ajoutée : {path.name if path else url} ({int(dur // 60)} min)",
-                         reply_markup=kb([[("🎞 Banque vidéos", "bk")]]))
-    await db.log_event(f"🎞 Nouveau fond « {category} » : {path.name if path else url}")
+    await info.edit_text(f"✓ Ajoutée : {path.name if path else url}, {int(dur // 60)} min",
+                         reply_markup=kb([[("Banque vidéo", "bk")]]))
+    await db.log_event(f"Nouveau fond dans « {category} » : {path.name if path else url}")
 
 
 # ---------------------------------------------------------------------------- erreurs
@@ -677,7 +680,7 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.error("Erreur Telegram", exc_info=context.error)
     if isinstance(update, Update) and update.callback_query:
         try:
-            await update.callback_query.answer(f"⚠️ {str(context.error)[:180]}", show_alert=True)
+            await update.callback_query.answer(str(context.error)[:190], show_alert=True)
         except TelegramError:
             pass
 

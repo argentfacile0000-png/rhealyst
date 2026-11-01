@@ -17,14 +17,14 @@ from .. import db
 from ..models import Publication, PubStatus, Video
 from ..notify import STEPS, NullProgress, Progress
 from .screens import video_caption, video_keyboard
-from .ui import PLATFORM, SEP, bar, esc, kb, mmss
+from .ui import PLATFORM, bar, esc, kb, mmss, strip_platform
 
 if TYPE_CHECKING:
     from ..core import Services
 
 log = logging.getLogger(__name__)
 
-STATE_ICON = {"wait": "⏳", "run": "🔄", "done": "✅", "fail": "❌"}
+STATE_ICON = {"wait": "○", "run": "●", "done": "✓", "fail": "✕"}
 
 
 class TelegramProgress:
@@ -36,22 +36,22 @@ class TelegramProgress:
         self.title = title
         self.message_id: int | None = None
         self.started = time.monotonic()
-        self.states = {key: ("wait", "", None) for key, _, _ in STEPS}
+        self.states = {key: ("wait", "", None) for key, _ in STEPS}
         self.footer = ""
         self._lock = asyncio.Lock()
         self._last_text = ""
 
     def render(self) -> str:
-        lines = [f"⚙️ <b>{esc(self.title)}</b>", SEP]
-        for key, emoji, label in STEPS:
+        lines = [f"<b>{esc(self.title)}</b>", ""]
+        for key, label in STEPS:
             state, detail, pct = self.states[key]
-            line = f"{STATE_ICON[state]} {emoji} {label}"
+            text = f"<b>{label}</b>" if state == "run" else label
+            lines.append(f"{STATE_ICON[state]}  {text}")
             if state == "run" and pct is not None:
-                line += f"\n     {bar(pct)} {int(pct * 100)}%"
-            lines.append(line)
+                lines.append(f"    <code>{bar(pct)}</code>  {int(pct * 100)} %")
             if detail:
-                lines.append(f"     └ <i>{esc(detail)}</i>")
-        lines.append(f"\n⏱ {mmss(time.monotonic() - self.started)}")
+                lines.append(f"    <i>{esc(detail)}</i>")
+        lines += ["", f"<i>{mmss(time.monotonic() - self.started)} écoulées</i>"]
         if self.footer:
             lines.append(self.footer)
         return "\n".join(lines)
@@ -96,7 +96,7 @@ class TelegramProgress:
                 if state == "run":
                     self.states[key] = ("fail", detail, None)
         self.footer = f"\n<b>{esc(text)}</b>"
-        await self._push(final=True, markup=kb([[("📋 File d'attente", "q"), ("🏠 Accueil", "h")]]))
+        await self._push(final=True, markup=kb([[("File d'attente", "q"), ("Accueil", "h")]]))
 
 
 class TelegramNotifier:
@@ -122,7 +122,7 @@ class TelegramNotifier:
             try:
                 await self.bot.send_message(chat, text, parse_mode=ParseMode.HTML,
                                             disable_notification=level == "info",
-                                            reply_markup=kb([[("🏠 Dashboard", "h")]]))
+                                            reply_markup=kb([[("Ouvrir le dashboard", "h")]]))
             except TelegramError as exc:
                 log.warning("Notification impossible (%s): %s", chat, exc)
 
@@ -194,22 +194,23 @@ class TelegramNotifier:
         if v is None:
             return
         ok = [p for p in pubs if p.status in PubStatus.OK]
-        lines = [("🚀 <b>Publiée</b>" if ok else "❌ <b>Publication échouée</b>") + f" · #{v.id}",
-                 f"« {esc(v.title[:100])} »" + (f" · Partie {v.part_index}/{v.part_count}" if v.part_count > 1 else "")]
+        part = f" · partie {v.part_index}/{v.part_count}" if v.part_count > 1 else ""
+        lines = [f"<b>{'Publiée' if ok else 'Publication échouée'}</b> · #{v.id}",
+                 f"{esc(v.title[:100])}<i>{part}</i>", ""]
         for p in pubs:
-            line = f"{PLATFORM.get(p.platform, p.platform)} : "
+            name = PLATFORM.get(p.platform, p.platform)
             if p.status == PubStatus.PUBLISHED:
-                line += f"✅ <a href=\"{esc(p.url)}\">voir la vidéo</a>" if p.url else "✅ en ligne"
+                state = f"✓ <a href=\"{esc(p.url)}\">voir la vidéo</a>" if p.url else "✓ en ligne"
             elif p.status == PubStatus.DRAFT:
-                line += "📥 envoyée en brouillon (finalise dans l'app TikTok)"
+                state = "✓ brouillon envoyé, <i>à finaliser dans l’app TikTok</i>"
             elif p.status == PubStatus.PROCESSING:
-                line += "⚙️ en traitement"
+                state = "en traitement"
             else:
-                line += f"❌ {esc(p.error[:200])}"
-            lines.append(line)
-        rows = [[("🔎 Détails", f"v:{video_id}"), ("🏠 Dashboard", "h")]]
+                state = f"✕ {esc(strip_platform(p.error, name)[:200])}"
+            lines.append(f"{name}  {state}")
+        rows = [[("Détails", f"v:{video_id}"), ("Dashboard", "h")]]
         if any(p.status == PubStatus.FAILED for p in pubs):
-            rows.insert(0, [("🔁 Réessayer", f"vn:{video_id}")])
+            rows.insert(0, [("Réessayer", f"vn:{video_id}")])
         for chat in self.admins:
             try:
                 await self.bot.send_message(chat, "\n".join(lines), parse_mode=ParseMode.HTML,

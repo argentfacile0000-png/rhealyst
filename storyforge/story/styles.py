@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,7 @@ class StoryFormat:
     label: str  # libellé FR pour le dashboard
     brief: str  # consigne pour le modèle
     hook_style: str  # "headline" | "question"
+    pitch: str = ""  # résumé en une ligne pour le dashboard
 
 
 FORMATS: dict[str, StoryFormat] = {
@@ -125,6 +126,22 @@ FORMATS: dict[str, StoryFormat] = {
         ),
     ]
 }
+
+PITCHES = {
+    "askreddit": "Une question type Reddit lue à voix haute, puis une réponse absurde et drôle.",
+    "drama": "Trahison entre amis ou en couple, révélations en cascade.",
+    "revenge": "On lui fait du tort, il prépare une vengeance maligne et légale.",
+    "aita": "Dilemme moral « Ai-je tort ? » qui fait débattre en commentaires.",
+    "entitled": "Client, voisin ou parent insupportable remis à sa place.",
+    "workplace": "Patron toxique, collègue voleur de mérite, démission mémorable.",
+    "family": "Héritage, mariage, secret de famille révélé en public.",
+    "school": "Bureau du proviseur, prof injuste, blague devenue légendaire.",
+    "karma": "Quelqu'un d'odieux reçoit sa leçon en quelques minutes.",
+    "love": "Rendez-vous catastrophe, ex qui revient, mensonge qui s'effondre.",
+    "wholesome": "Une bonne action qui revient des années plus tard.",
+    "creepy": "Histoire inquiétante et réaliste, chute glaçante.",
+}
+FORMATS = {k: replace(f, pitch=PITCHES.get(k, "")) for k, f in FORMATS.items()}
 
 DEFAULT_FORMATS = ["askreddit", "drama", "revenge"]
 

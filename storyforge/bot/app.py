@@ -20,16 +20,16 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 COMMANDS = [
-    ("start", "🎬 Dashboard"),
-    ("channels", "📺 Mes chaînes"),
-    ("generate", "⚡ Générer maintenant"),
-    ("queue", "📋 File & planning"),
-    ("stats", "📈 Statistiques"),
-    ("bank", "🎞 Banque vidéos"),
-    ("new", "➕ Nouvelle chaîne"),
-    ("settings", "⚙️ Réglages"),
-    ("log", "📜 Journal"),
-    ("help", "❓ Aide"),
+    ("start", "Dashboard"),
+    ("channels", "Chaînes"),
+    ("generate", "Générer maintenant"),
+    ("queue", "File d'attente et planning"),
+    ("stats", "Statistiques"),
+    ("bank", "Banque vidéo"),
+    ("new", "Nouvelle chaîne"),
+    ("settings", "Réglages système"),
+    ("log", "Journal"),
+    ("help", "Aide"),
 ]
 
 
@@ -67,8 +67,8 @@ async def announce(app: Application, svc: Services) -> None:
                     chat_id=admin, menu_button=MenuButtonWebApp(text="Dashboard", web_app=WebAppInfo(url=url))
                 )
             await app.bot.send_message(
-                admin, "🟢 <b>StoryForge</b> est en ligne.", parse_mode=ParseMode.HTML,
-                disable_notification=True, reply_markup=kb([[("🎬 Ouvrir le dashboard", "h")]]),
+                admin, "<b>StoryForge</b> est en ligne.", parse_mode=ParseMode.HTML,
+                disable_notification=True, reply_markup=kb([[("Ouvrir le dashboard", "h")]]),
             )
         except TelegramError as exc:
             log.warning("Annonce impossible pour %s : %s (as-tu lancé /start avec ce compte ?)", admin, exc)

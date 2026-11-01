@@ -50,7 +50,7 @@ async def run() -> None:
             web_task = asyncio.create_task(web_server.serve(), name="webapp")
             logging.info("Mini App sur http://%s:%s/app (public : %s)", settings.webapp_host, settings.webapp_port,
                          settings.webapp_url or "PUBLIC_URL non défini")
-        logging.info("🎬 StoryForge en ligne — ouvre ton bot Telegram et tape /start")
+        logging.info("StoryForge en ligne — ouvre ton bot Telegram et tape /start")
         await stop.wait()
         logging.info("Arrêt en cours…")
         if web_server and web_task:
@@ -68,7 +68,7 @@ async def demo(style: str, card: bool) -> None:
     settings = get_settings()
     settings.ensure_dirs()
     out = await run_demo(settings, style=style, card=card)
-    print(f"✅ Vidéo de démonstration : {out}")
+    print(f"Vidéo de démonstration : {out}")
 
 
 async def story(language: str, fmt: str | None, parts: int, seconds: int) -> None:

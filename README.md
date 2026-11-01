@@ -56,16 +56,24 @@ depuis Telegram (thème, ton, interdits…).
 
 ## Le dashboard Telegram
 
-Tout se pilote depuis le bot, dans un seul message qui se met à jour :
+Le design suit le [Minimal Design System](https://github.com/holger1411/minimal-design-system-skill) :
+palette neutre, typographie Inter, cartes à bordure, beaucoup d'espace, couleur réservée aux statuts.
 
-- **🏠 Accueil** : état du système, générées/publiées/échecs du jour, tâches en cours, chaînes et prochains créneaux, crédit ElevenLabs restant.
-- **📺 Chaînes** : activer/mettre en pause, ⚡ générer maintenant, 🚀 publier la suivante, 🎬 historique des vidéos, 🔗 lier YouTube / TikTok.
-- **✏️ Réglages par chaîne** : langue, formats d'histoires, narrateur, nombre de parties, durée, voix (liste de tes voix ElevenLabs), vitesse, fonds vidéo, style/couleur/position des sous-titres, label PARTIE, carte d'accroche, musique, horaires, fuseau, variation aléatoire des horaires, validation manuelle, réserve de vidéos d'avance, visibilité YouTube/TikTok, mode TikTok.
-- **Progression en direct** : chaque génération affiche un message qui avance (🧠 histoire → 🎙 voix → 🎞 fond → 🎬 montage avec barre de % → ✨).
-- **✋ Validation** : chaque vidéo t'est envoyée avec ✅ Valider · 🚀 Publier maintenant · 🔁 Régénérer · 🗑 Jeter · 📜 Texte complet.
-- **🔔 Notifications** : liens YouTube/TikTok dès la publication, erreurs avec bouton 🔁 Réessayer.
-- **📋 File & planning**, **📈 Statistiques** (14 jours), **🎞 Banque vidéos** (ajout de fonds par fichier ou par lien), **📜 Journal**, **⚙️ Réglages** (pause globale, diagnostic des APIs).
-- **🖥 Mini App** (optionnelle) : un vrai dashboard visuel qui s'ouvre dans Telegram (KPI, graphique 14 jours, vidéos à valider avec lecteur, chaînes avec interrupteurs, dernières publications). Thème clair/sombre automatique.
+**Dans le bot**, tout se pilote depuis un seul message qui se met à jour. Les messages sont typographiques
+(titres et valeurs en gras, informations secondaires en italique), sans emoji décoratif ; les statuts utilisent
+des glyphes monochromes (● actif, ○ en pause, ✓ fait, ✕ échec) toujours accompagnés d'un libellé.
+
+- **Accueil** : état du système, générées / publiées / à valider / échecs du jour, tâches en cours, chaînes et prochains créneaux, crédits ElevenLabs.
+- **Chaînes** : activer ou mettre en pause, générer maintenant, publier la suivante, historique des vidéos, liaison YouTube / TikTok.
+- **Réglages par chaîne** (Histoire, Voix, Vidéo, Planning, Publication) : langue, formats, narrateur, parties, durée, voix ElevenLabs, vitesse, fonds, style des sous-titres, label « Partie N », carte d'accroche, musique, horaires, fuseau, décalage aléatoire, validation manuelle, réserve, visibilité YouTube / TikTok, mode TikTok.
+- **Progression en direct** : histoire → voix off → séquence de fond → montage (barre de progression) → finalisation.
+- **Validation** : chaque vidéo arrive avec Publier maintenant · Valider · Régénérer · Jeter · Aperçu · Texte complet.
+- **Notifications** : liens YouTube / TikTok dès la publication, erreurs avec Réessayer.
+- **File d'attente**, **Statistiques** (14 jours), **Banque vidéo** (ajout par fichier ou par lien), **Journal**, **Réglages** (pause globale, diagnostic des APIs).
+
+**La Mini App** (optionnelle) s'ouvre dans Telegram : indicateurs du jour, graphique des publications
+(infobulle au toucher et vue tableau), vidéos à valider avec lecteur, chaînes avec interrupteurs, dernières
+publications. Thème clair ou sombre selon Telegram. Construite avec Tailwind CSS et les tokens HSL du design system.
 
 Seuls les comptes listés dans `TELEGRAM_ADMIN_IDS` peuvent utiliser le bot.
 

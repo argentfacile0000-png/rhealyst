@@ -125,7 +125,7 @@ class Pipeline:
                         if v:
                             v.status = VideoStatus.FAILED
                             v.error = "Une autre partie de l'histoire a échoué"
-            await progress.finish(f"❌ Échec : {exc}", ok=False)
+            await progress.finish(f"Échec : {exc}", ok=False)
             await db.log_event(f"Génération échouée ({ch.name}) : {exc}", "error", ch.id)
             raise
 
@@ -138,10 +138,10 @@ class Pipeline:
                     v.publish_after = publish_after and vid == video_ids[0] and not ch.approval_required
         n = len(video_ids)
         await progress.finish(
-            f"✅ {n} vidéo{'s' if n > 1 else ''} prête{'s' if n > 1 else ''}"
+            f"{n} vidéo{'s' if n > 1 else ''} prête{'s' if n > 1 else ''}"
             + (" · en attente de validation" if ch.approval_required else "")
         )
-        await db.log_event(f"🎬 {ch.name} : « {gs.title[:80]} » ({n} partie{'s' if n > 1 else ''})", "success", ch.id)
+        await db.log_event(f"{ch.name} : « {gs.title[:80]} » générée ({n} partie{'s' if n > 1 else ''})", "success", ch.id)
 
         if ch.approval_required:
             for vid in video_ids:
@@ -288,7 +288,8 @@ class Pipeline:
             platforms = ch.platforms()
             if not platforms:
                 await self.notifier.notify(
-                    f"⚠️ <b>{ch.name}</b> : aucune plateforme liée/activée, la vidéo #{video_id} reste en file.",
+                    f"<b>Publication en attente</b> · {ch.name}\n\nAucune plateforme liée ou activée. "
+                    f"La vidéo #{video_id} reste en stock.",
                     "warning", ch.id,
                 )
                 return
@@ -360,7 +361,9 @@ class Pipeline:
                     pub = await s.get(Publication, pub_id)
                     pub.status = PubStatus.FAILED
                     pub.error = msg[:1000]
-                await db.log_event(f"❌ {ch.name} · {platform} : {msg}", "error", ch.id)
+                label = "YouTube" if platform == "youtube" else "TikTok"
+                detail = msg if label.lower() in msg.lower() else f"{label} : {msg}"
+                await db.log_event(f"{ch.name} · {detail}", "error", ch.id)
 
         async with db.session() as s:
             v = await s.get(Video, video_id)
@@ -371,7 +374,7 @@ class Pipeline:
             else:
                 v.error = "Toutes les publications ont échoué"
         if any_ok:
-            await db.log_event(f"🚀 {ch.name} : « {story.title[:70]} » publiée", "success", ch.id)
+            await db.log_event(f"{ch.name} : « {story.title[:70]} » publiée", "success", ch.id)
         await self.notifier.video_published(video_id)
 
     async def _save_creds(self, channel_id: int, field: str, creds: dict) -> None:

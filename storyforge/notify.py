@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import Protocol
 
-STEPS: list[tuple[str, str, str]] = [
-    ("story", "🧠", "Écriture de l'histoire"),
-    ("voice", "🎙", "Voix off ElevenLabs"),
-    ("background", "🎞", "Séquence de fond"),
-    ("render", "🎬", "Montage vidéo"),
-    ("finish", "✨", "Finalisation"),
+STEPS: list[tuple[str, str]] = [
+    ("story", "Histoire"),
+    ("voice", "Voix off"),
+    ("background", "Séquence de fond"),
+    ("render", "Montage"),
+    ("finish", "Finalisation"),
 ]
 
 

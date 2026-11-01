@@ -103,7 +103,7 @@ class Services:
 
     async def set_paused(self, paused: bool) -> None:
         await db.kv_set(PAUSE_KEY, paused)
-        await db.log_event("⏸ Système mis en pause" if paused else "▶️ Système relancé", "warning" if paused else "info")
+        await db.log_event("Système mis en pause" if paused else "Système relancé", "warning" if paused else "info")
 
     # ------------------------------------------------------------------ files d'attente
     def missing_prereqs(self) -> list[str]:
@@ -131,8 +131,8 @@ class Services:
                 if progress is None:  # génération automatique : on prévient quand même
                     ch = await self.get_channel(channel_id)
                     await self.notifier.notify(
-                        f"❌ <b>Génération auto échouée</b> · {ch.name if ch else channel_id}\n<i>{str(exc)[:300]}</i>\n"
-                        f"Nouvel essai automatique dans {delay // 60} min.",
+                        f"<b>Génération automatique échouée</b> · {ch.name if ch else channel_id}\n\n{str(exc)[:300]}\n"
+                        f"<i>Nouvel essai automatique dans {delay // 60} min.</i>",
                         "error", channel_id,
                     )
                 raise
@@ -175,11 +175,11 @@ class Services:
             if not self.jobs.count(kind="generate", channel_id=channel_id):
                 self.enqueue_generate(channel_id, publish_after=True, label=f"Créneau · {ch.name}")
             else:
-                await db.log_event(f"⏳ {ch.name} : créneau atteint pendant une génération, publication à la fin", "warning", ch.id)
+                await db.log_event(f"{ch.name} : créneau atteint pendant une génération, publication à la fin", "warning", ch.id)
             return
         await self.notifier.notify(
-            f"⏰ <b>{ch.name}</b> : créneau de publication atteint mais aucune vidéo validée.\n"
-            "Valide une vidéo en attente ou lance une génération.",
+            f"<b>Créneau manqué</b> · {ch.name}\n\nAucune vidéo validée pour ce créneau.\n"
+            "<i>Valide une vidéo en attente ou lance une génération.</i>",
             "warning", ch.id,
         )
 
@@ -230,7 +230,7 @@ class Services:
                 v.file_path = None
                 v.preview_path = None
         if removed:
-            await db.log_event(f"🧹 Nettoyage : {removed} fichier(s) vidéo supprimé(s)")
+            await db.log_event(f"Nettoyage : {removed} fichier(s) vidéo supprimé(s)")
 
     # ------------------------------------------------------------------ chaînes
     async def create_channel(self, name: str, **fields: Any) -> Channel:
@@ -244,7 +244,7 @@ class Services:
             )
             s.add(ch)
             await s.flush()
-        await db.log_event(f"➕ Nouvelle chaîne : {ch.name}", "info", ch.id)
+        await db.log_event(f"Nouvelle chaîne : {ch.name}", "info", ch.id)
         return ch
 
     async def get_channel(self, channel_id: int) -> Channel | None:
@@ -274,7 +274,7 @@ class Services:
             await s.execute(delete(Story).where(Story.channel_id == channel_id))
             await s.execute(delete(Channel).where(Channel.id == channel_id))
         self.scheduler.remove_channel(channel_id)
-        await db.log_event(f"🗑 Chaîne #{channel_id} supprimée", "warning")
+        await db.log_event(f"Chaîne #{channel_id} supprimée", "warning")
 
     # ------------------------------------------------------------------ vidéos
     async def get_video(self, video_id: int) -> Video | None:
@@ -291,7 +291,7 @@ class Services:
     async def approve(self, video_id: int) -> Video | None:
         v = await self.set_video_status(video_id, VideoStatus.READY)
         if v:
-            await db.log_event(f"✅ Vidéo #{video_id} validée", "info", v.channel_id)
+            await db.log_event(f"Vidéo #{video_id} validée", "info", v.channel_id)
         return v
 
     async def discard(self, video_id: int) -> Video | None:
@@ -304,7 +304,7 @@ class Services:
                 vv = await s.get(Video, video_id)
                 vv.file_path = None
                 vv.preview_path = None
-            await db.log_event(f"🗑 Vidéo #{video_id} jetée", "info", v.channel_id)
+            await db.log_event(f"Vidéo #{video_id} jetée", "info", v.channel_id)
         return v
 
     # ------------------------------------------------------------------ OAuth
@@ -352,7 +352,7 @@ class Services:
                 log.warning("Infos TikTok indisponibles: %s", exc)
                 account = "compte TikTok lié"
             ch = await self.update_channel(channel_id, tiktok_credentials=creds, tiktok_account=account)
-        await db.log_event(f"🔗 {ch.name} : {platform} lié ({account})", "success", channel_id)
+        await db.log_event(f"{ch.name} : {'YouTube' if platform == 'youtube' else 'TikTok'} lié ({account})", "success", channel_id)
         return platform, ch, account
 
     async def complete_oauth_from_url(self, pasted: str) -> tuple[str, Channel, str]:

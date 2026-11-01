@@ -85,7 +85,7 @@ def create_app(svc: Services) -> FastAPI:
         if ch is None:
             raise HTTPException(404, "Chaîne introuvable")
         ch = await svc.update_channel(cid, active=not ch.active)
-        await db.log_event(f"{'▶️' if ch.active else '⏸'} {ch.name} {'activée' if ch.active else 'en pause'} (Mini App)", "info", cid)
+        await db.log_event(f"{ch.name} {'activée' if ch.active else 'mise en pause'} depuis la Mini App", "info", cid)
         return {"active": ch.active}
 
     @app.post("/api/channels/{cid}/generate")
@@ -155,8 +155,8 @@ def create_app(svc: Services) -> FastAPI:
             platform, ch, account = await svc.complete_oauth(q.get("state", ""), q.get("code", ""))
         except Exception as exc:
             return _page("Échec de la liaison", html.escape(str(exc)), ok=False)
-        await svc.notifier.notify(f"🔗 <b>{html.escape(ch.name)}</b> : YouTube lié ({html.escape(account)}) ✅", "success", ch.id)
-        return _page("Compte lié ✅", f"La chaîne <b>{html.escape(ch.name)}</b> publiera sur <b>{html.escape(account)}</b>."
+        await svc.notifier.notify(f"<b>YouTube lié</b> · {html.escape(ch.name)}\n\nCompte : {html.escape(account)}", "success", ch.id)
+        return _page("Compte lié", f"La chaîne <b>{html.escape(ch.name)}</b> publiera sur <b>{html.escape(account)}</b>."
                      "<br>Tu peux fermer cette page et revenir sur Telegram.")
 
     return app
