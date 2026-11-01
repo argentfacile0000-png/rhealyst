@@ -24,6 +24,7 @@ from telegram.ext import (
 from .. import db
 from ..models import VideoFormat, VideoStatus
 from ..publishers import PublisherError
+from ..dates import parse_when
 from ..version import auto_update_flag
 from ..video.background import VIDEO_EXTS
 from . import screens
@@ -250,6 +251,87 @@ async def video_action(update: Update, context: ContextTypes.DEFAULT_TYPE, actio
         await show(update, context, await screens.video_view(svc, vid, with_text=True), new=True)
 
 
+async def video_extra_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str, parts: list[str]) -> None:
+    """Archiver, programmer, découper."""
+    svc = svc_of(context)
+    q = update.callback_query
+    vid = int(parts[1])
+    v = await svc.get_video(vid)
+    if v is None:
+        await q.answer("Vidéo introuvable", show_alert=True)
+        return
+    as_new = q.message is not None and getattr(q.message, "text", None) is None
+    try:
+        if head == "var":
+            await svc.archive(vid)
+            await q.answer("Vidéo archivée")
+            await refresh_video(update, context, vid)
+        elif head == "vua":
+            await svc.unarchive(vid)
+            await q.answer("Vidéo désarchivée")
+            await refresh_video(update, context, vid)
+        elif head == "vsu":
+            await svc.unschedule(vid)
+            await q.answer("Programmation annulée")
+            await refresh_video(update, context, vid)
+        elif head == "vsc":
+            ch = await svc.get_channel(v.channel_id)
+            await q.answer()
+            context.user_data["await"] = {"kind": "schedule", "vid": vid}
+            await show(update, context, (screens.schedule_prompt(v, ch.timezone if ch else svc.settings.timezone),
+                                         screens.schedule_keyboard(vid)), new=as_new)
+        elif head == "vsq":
+            ch = await svc.get_channel(v.channel_id)
+            presets = {"t20": "aujourd'hui 20h", "d12": "demain 12h", "d18": "demain 18h", "d21": "demain 21h"}
+            when = parse_when(presets.get(parts[2], "demain 18h"), ch.timezone if ch else svc.settings.timezone)
+            await svc.schedule(vid, when)
+            context.user_data.pop("await", None)
+            await q.answer("Publication programmée")
+            await refresh_video(update, context, vid)
+        elif head == "vsp":
+            await q.answer()
+            await show(update, context, await screens.split_menu(svc, vid), new=as_new)
+        elif head == "vsx":
+            seconds = int(parts[2])
+            chat_id = update.effective_chat.id
+
+            async def run() -> None:
+                try:
+                    ids = await svc.split(vid, seconds)
+                    text = f"✓ Vidéo #{vid} découpée en {len(ids)} parties : " + ", ".join(f"#{i}" for i in ids)
+                except Exception as exc:
+                    text = f"✕ Découpage de la vidéo #{vid} impossible : {exc}"
+                await context.bot.send_message(chat_id, text,
+                                               reply_markup=kb([[("Voir les vidéos", f"cvv:{v.channel_id}:0")]]))
+
+            svc.jobs.submit("generate", f"Découpage #{vid}", run, channel_id=v.channel_id, tag="split")
+            await q.answer(f"Découpage en parties de {seconds} s lancé")
+    except ValueError as exc:
+        await q.answer(str(exc)[:190], show_alert=True)
+
+
+async def elevenlabs_keys_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str, parts: list[str]) -> None:
+    svc = svc_of(context)
+    q = update.callback_query
+    ring = svc.pipeline.tts.keys
+    if head == "eka":
+        await q.answer()
+        await prompt(update, context, "<b>Ajouter une clé ElevenLabs</b>\n\nEnvoie la clé API (elevenlabs.io, profil, "
+                     "API keys).\n<i>Ton message est supprimé dès réception ; la clé est vérifiée puis enregistrée "
+                     "sur ton serveur.</i>", {"kind": "el_key"})
+        return
+    if head == "ekd":
+        removed = await ring.remove(parts[1])
+        svc._quota_cache = (0.0, None)
+        await q.answer("Clé retirée" if removed else "Cette clé vient du .env : retire-la du fichier")
+    elif head == "ekr":
+        await ring.reactivate(parts[1])
+        await q.answer("Clé réactivée")
+    else:
+        await q.answer()
+    await show(update, context, await screens.elevenlabs_keys(svc))
+
+
 # ---------------------------------------------------------------------------- comptes
 async def link_account(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: int, platform: str) -> None:
     svc = svc_of(context)
@@ -452,12 +534,20 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     elif head == "cvv":
         await q.answer()
         await show(update, context, await screens.channel_videos(svc, cid, int(parts[2]) if len(parts) > 2 else 0))
+    elif head == "cva":
+        await q.answer()
+        await show(update, context, await screens.channel_videos(svc, cid, int(parts[2]) if len(parts) > 2 else 0,
+                                                                 archived=True))
     elif head == "v":
         await q.answer()
         is_media = q.message is not None and getattr(q.message, "text", None) is None
         await show(update, context, await screens.video_view(svc, cid), new=is_media)
     elif head in ("va", "vn", "vx", "vr", "vf", "vt"):
         await video_action(update, context, head, cid)
+    elif head in ("var", "vua", "vsc", "vsq", "vsu", "vsp", "vsx"):
+        await video_extra_action(update, context, head, parts)
+    elif head in ("ek", "eka", "ekd", "ekr"):
+        await elevenlabs_keys_action(update, context, head, parts)
     elif head == "bkc":
         cats = sorted(svc.pipeline.bank.categories().keys())
         idx = int(parts[1])
@@ -626,6 +716,32 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             label = PLATFORM[res.platform]
             await info.edit_text(f"✓ {label} connecté à « {res.channel.name} » : {res.account}")
             await show(update, context, await screens.accounts(svc, res.channel.id), new=True)
+        elif kind == "schedule":
+            v = await svc.get_video(state["vid"])
+            ch = await svc.get_channel(v.channel_id) if v else None
+            when = parse_when(text, ch.timezone if ch else svc.settings.timezone)
+            await svc.schedule(state["vid"], when)
+            context.user_data.pop("await", None)
+            await notifier_of(context).refresh_video_messages(state["vid"])
+            await show(update, context, await screens.video_view(svc, state["vid"]), new=True)
+        elif kind == "el_key":
+            try:  # la clé ne reste pas dans la conversation
+                await msg.delete()
+            except (TelegramError, AttributeError):
+                pass
+            if not re.fullmatch(r"[A-Za-z0-9_\-]{20,100}", text):
+                raise ValueError("Ce n'est pas une clé ElevenLabs valide")
+            try:
+                sub = await svc.pipeline.tts.subscription(api_key=text)
+            except Exception as exc:
+                raise ValueError(f"Clé refusée par ElevenLabs : {exc}") from exc
+            await svc.pipeline.tts.keys.add(text)
+            svc._quota_cache = (0.0, None)
+            context.user_data.pop("await", None)
+            left = int(sub.get("character_limit", 0)) - int(sub.get("character_count", 0))
+            await context.bot.send_message(update.effective_chat.id,
+                                           f"✓ Clé ajoutée : {max(0, left)} caractères disponibles.")
+            await show(update, context, await screens.elevenlabs_keys(svc), new=True)
         elif kind == "bg_newcat":
             cat = re.sub(r"[^a-z0-9_-]+", "-", text.lower()).strip("-")[:40]
             if not cat:

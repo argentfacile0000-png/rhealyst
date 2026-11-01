@@ -70,6 +70,18 @@ Une minute de narration consomme environ 1 000 à 1 500 caractères ElevenLabs :
 La miniature personnalisée n'est acceptée par YouTube que si la chaîne est validée par téléphone ; sinon la
 vidéo est publiée avec une image automatique.
 
+## Gérer les vidéos
+
+- **Découper en parties.** Réglages → Formats → « Découpage auto des Shorts » (60, 90 ou 120 s) : un Short plus long
+  est coupé automatiquement en Partie 1, 2, 3…, chacune en fin de phrase et de durée équilibrée, avec « Partie N »
+  en haut. Le bouton **Découper** d'une vidéo fait la même chose à la demande. La vidéo entière est archivée
+  (récupérable) et les parties sont publiées dans l'ordre, une par créneau.
+- **Archiver.** Met une vidéo de côté sans décider de son sort : elle sort du stock (une nouvelle vidéo est préparée
+  pour la remplacer) et reste consultable dans **Archives**. **Désarchiver** la remet là où elle était.
+- **Programmer.** Publie une vidéo à une date précise : « demain 18h », « vendredi 21h », « 25/12 18:30 »,
+  « dans 2h »… ou un bouton rapide (ce soir 20:00, demain 12:00…). La date suit le fuseau de la chaîne ;
+  les programmations sont conservées après un redémarrage et rattrapées si l'heure est passée entre-temps.
+
 ## Le dashboard Telegram
 
 Le design suit le [Minimal Design System](https://github.com/holger1411/minimal-design-system-skill) :
@@ -103,6 +115,18 @@ Seuls les comptes listés dans `TELEGRAM_ADMIN_IDS` peuvent utiliser le bot.
 - Un bot Telegram (créé avec [@BotFather](https://t.me/BotFather))
 - Une clé API ElevenLabs et une clé d'IA pour écrire les histoires : **Gemini ou Groq (gratuits)**, ou OpenAI (payant)
 - Pour publier : un projet Google Cloud (YouTube) et/ou une app TikTok for Developers
+
+### Clés ElevenLabs de secours
+
+Quand une clé ElevenLabs n'a plus de crédits, StoryForge passe automatiquement à la suivante et te prévient dans
+Telegram. La clé épuisée est mise de côté jusqu'à la remise à zéro de son quota mensuel. Ajoute des clés :
+
+- depuis le bot : Réglages → **Clés ElevenLabs** → Ajouter une clé (ton message est supprimé, la clé est vérifiée
+  puis enregistrée sur le serveur) ;
+- ou dans le `.env` : `ELEVENLABS_API_KEYS=clé2,clé3`.
+
+Les voix « premade » (Adam, Liam…) existent sur tous les comptes. Une voix clonée ou ajoutée depuis la bibliothèque
+doit être présente sur chaque compte ; sinon la clé suivante est essayée.
 
 ### IA des histoires : gratuite ou payante
 

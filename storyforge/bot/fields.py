@@ -107,6 +107,8 @@ COLORS = [("Blanc", "#FFFFFF"), ("Jaune", "#FFE14D"), ("Vert", "#4DFF88"), ("Cya
 FIELDS: list[Field] = [
     # --- Formats
     Field("shorts_enabled", "Shorts verticaux (YouTube, TikTok, Reels)", "formats", "toggle"),
+    Field("split_seconds", "Découpage auto des Shorts", "formats", "choice",
+          options=[("Désactivé", 0), ("Parties de 60 s", 60), ("Parties de 90 s", 90), ("Parties de 120 s", 120)]),
     Field("long_enabled", "Vidéos longues YouTube (16:9)", "formats", "toggle"),
     Field("long_duration", "Durée des vidéos longues", "formats", "choice",
           options=[("5–8 min", "5-8"), ("8–12 min", "8-12"), ("12–20 min", "12-20"), ("20–30 min", "20-30")],

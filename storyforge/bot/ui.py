@@ -33,6 +33,8 @@ VIDEO_STATUS = {
     VideoStatus.PUBLISHED: ("✓", "Publiée"),
     VideoStatus.FAILED: ("✕", "Échec"),
     VideoStatus.DISCARDED: ("–", "Jetée"),
+    VideoStatus.ARCHIVED: ("□", "Archivée"),
+    VideoStatus.SCHEDULED: ("◷", "Programmée"),
 }
 
 PUB_STATUS = {

@@ -97,6 +97,14 @@ async def probe_duration(path: Path, ffprobe: str = "ffprobe") -> float:
     return float(dur or 0.0)
 
 
+async def probe_dimensions(path: Path, ffprobe: str = "ffprobe") -> tuple[int, int] | None:
+    info = await ffprobe_json(path, ffprobe)
+    for st in info.get("streams", []):
+        if st.get("codec_type") == "video" and st.get("width") and st.get("height"):
+            return int(st["width"]), int(st["height"])
+    return None
+
+
 async def probe_has_audio(path: Path, ffprobe: str = "ffprobe") -> bool:
     info = await ffprobe_json(path, ffprobe)
     return any(s.get("codec_type") == "audio" for s in info.get("streams", []))

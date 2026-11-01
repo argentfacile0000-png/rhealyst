@@ -8,7 +8,7 @@ import logging
 import secrets
 import time
 import urllib.parse
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -83,6 +83,7 @@ class Services:
     async def start(self) -> None:
         self.settings.ensure_dirs()
         await db.init_db(self.settings.db_url)
+        await self.pipeline.tts.keys.load()
         await self._recover()
         await self.jobs.start()
         await self.scheduler.start()
@@ -123,7 +124,7 @@ class Services:
         missing = []
         if not s.llm.api_key:
             missing.append(f"{s.llm.env} (IA des histoires)")
-        if not s.elevenlabs_api_key:
+        if not self.pipeline.tts.keys or not self.pipeline.tts.keys.has_keys():
             missing.append("ELEVENLABS_API_KEY")
         if not self.pipeline.bank.categories():
             missing.append("vidéos de fond")
@@ -329,6 +330,100 @@ class Services:
             await db.log_event(f"Vidéo #{video_id} jetée", "info", v.channel_id)
         return v
 
+    # ------------------------------------------------------------------ archives, programmation, découpage
+    async def archive(self, video_id: int) -> Video:
+        async with db.session() as s:
+            v = await s.get(Video, video_id)
+            if v is None:
+                raise ValueError("Vidéo introuvable")
+            if v.status not in VideoStatus.ARCHIVABLE:
+                raise ValueError("Cette vidéo ne peut pas être archivée dans son état actuel")
+            if v.status == VideoStatus.SCHEDULED:
+                self.scheduler.unschedule_video(video_id)
+            v.archived_from = v.status
+            v.status = VideoStatus.ARCHIVED
+            v.scheduled_at = None
+        await db.log_event(f"Vidéo #{video_id} archivée", "info", v.channel_id)
+        return v
+
+    async def unarchive(self, video_id: int) -> Video:
+        async with db.session() as s:
+            v = await s.get(Video, video_id)
+            if v is None or v.status != VideoStatus.ARCHIVED:
+                raise ValueError("Cette vidéo n'est pas archivée")
+            ch = await s.get(Channel, v.channel_id)
+            restore = v.archived_from
+            if restore not in (VideoStatus.PENDING_APPROVAL, VideoStatus.READY, VideoStatus.FAILED):
+                restore = VideoStatus.PENDING_APPROVAL if ch and ch.approval_required else VideoStatus.READY
+            if not v.file_path or not Path(v.file_path).exists():
+                restore, v.error = VideoStatus.FAILED, "Fichier vidéo supprimé"
+            v.status = restore
+            v.archived_from = ""
+        await db.log_event(f"Vidéo #{video_id} désarchivée", "info", v.channel_id)
+        return v
+
+    async def schedule(self, video_id: int, when: datetime) -> Video:
+        """Programme la publication d'une vidéo à une date précise (when : date avec fuseau)."""
+        when_utc = when.astimezone(timezone.utc).replace(tzinfo=None)
+        async with db.session() as s:
+            v = await s.get(Video, video_id)
+            if v is None:
+                raise ValueError("Vidéo introuvable")
+            if v.status not in VideoStatus.SCHEDULABLE or not v.file_path:
+                raise ValueError("Cette vidéo ne peut pas être programmée")
+            v.status = VideoStatus.SCHEDULED
+            v.scheduled_at = when_utc
+            v.archived_from = ""
+        self.scheduler.schedule_video(video_id, when_utc)
+        await db.log_event(f"Vidéo #{video_id} programmée", "info", v.channel_id)
+        return v
+
+    async def unschedule(self, video_id: int) -> Video:
+        self.scheduler.unschedule_video(video_id)
+        async with db.session() as s:
+            v = await s.get(Video, video_id)
+            if v is None or v.status != VideoStatus.SCHEDULED:
+                raise ValueError("Cette vidéo n'est pas programmée")
+            v.status = VideoStatus.READY
+            v.scheduled_at = None
+        await db.log_event(f"Programmation de la vidéo #{video_id} annulée", "info", v.channel_id)
+        return v
+
+    async def publish_scheduled(self, video_id: int) -> None:
+        v = await self.get_video(video_id)
+        if v is None or v.status != VideoStatus.SCHEDULED:
+            return
+        if await self.is_paused():  # pause globale : on repousse de 15 min
+            retry = datetime.now(timezone.utc) + timedelta(minutes=15)
+            async with db.session() as s:
+                vv = await s.get(Video, video_id)
+                vv.scheduled_at = retry.replace(tzinfo=None)
+            self.scheduler.schedule_video(video_id, retry)
+            await db.log_event(f"Vidéo #{video_id} : publication programmée repoussée (système en pause)", "warning",
+                               v.channel_id)
+            return
+        await self.set_video_status(video_id, VideoStatus.READY)
+        self.enqueue_publish(video_id, v.channel_id)
+
+    async def split(self, video_id: int, max_seconds: int) -> list[int]:
+        """Découpe à la demande ; les parties suivent le même parcours (validation ou stock)."""
+        v = await self.get_video(video_id)
+        if v is None:
+            raise ValueError("Vidéo introuvable")
+        if v.status not in (VideoStatus.PENDING_APPROVAL, VideoStatus.READY, VideoStatus.ARCHIVED, VideoStatus.FAILED):
+            raise ValueError("Cette vidéo ne peut pas être découpée dans son état actuel")
+        status = v.status
+        if status in (VideoStatus.ARCHIVED, VideoStatus.FAILED):
+            ch = await self.get_channel(v.channel_id)
+            status = VideoStatus.PENDING_APPROVAL if ch and ch.approval_required else VideoStatus.READY
+        ids = await self.pipeline.split_video(video_id, max_seconds, status=status)
+        if hasattr(self.notifier, "refresh_video_messages"):
+            await self.notifier.refresh_video_messages(video_id)
+        if status == VideoStatus.PENDING_APPROVAL:
+            for vid in ids:
+                await self.notifier.video_for_approval(vid)
+        return ids
+
     # ------------------------------------------------------------------ comptes & OAuth
     def portal_available(self) -> bool:
         """La page de connexion n'est joignable que si le serveur web tourne derrière une URL https."""
@@ -512,20 +607,32 @@ class Services:
         return ch
 
     # ------------------------------------------------------------------ quotas
-    async def elevenlabs_quota(self) -> dict | None:
+    async def elevenlabs_quota(self, refresh: bool = False) -> dict | None:
+        """Crédits additionnés sur toutes les clés + détail par clé (cache 10 min)."""
         ts, data = self._quota_cache
-        if time.time() - ts < 600:
+        if not refresh and time.time() - ts < 600:
             return data
-        try:
-            sub = await self.pipeline.tts.subscription()
+        ring = self.pipeline.tts.keys
+        details = []
+        for k in ring.all() if ring else []:
+            entry = {"kid": k.kid, "masked": k.masked, "source": k.source, "status": ring.status(k)}
+            try:
+                sub = await self.pipeline.tts.subscription(api_key=k.key)
+                entry.update(used=int(sub.get("character_count", 0)), limit=int(sub.get("character_limit", 0)),
+                             tier=sub.get("tier", ""), reset=sub.get("next_character_count_reset_unix"))
+            except Exception as exc:
+                entry.update(error=str(exc)[:120])
+            details.append(entry)
+        ok = [d for d in details if "limit" in d]
+        if not ok:
+            data = {"used": 0, "limit": 0, "tier": "", "reset": None, "keys": details} if details else None
+        else:
             data = {
-                "used": int(sub.get("character_count", 0)),
-                "limit": int(sub.get("character_limit", 0)),
-                "tier": sub.get("tier", ""),
-                "reset": sub.get("next_character_count_reset_unix"),
+                "used": sum(d["used"] for d in ok),
+                "limit": sum(d["limit"] for d in ok),
+                "tier": ok[0]["tier"] if len(ok) == 1 else f"{len(ok)} clés",
+                "reset": min((d["reset"] for d in ok if d.get("reset")), default=None),
+                "keys": details,
             }
-        except Exception as exc:
-            log.info("Quota ElevenLabs indisponible: %s", exc)
-            data = None
         self._quota_cache = (time.time(), data)
         return data

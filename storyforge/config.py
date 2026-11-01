@@ -50,6 +50,7 @@ class Settings(BaseSettings):
 
     # --- ElevenLabs ---------------------------------------------------------
     elevenlabs_api_key: str = ""
+    elevenlabs_api_keys: str = ""  # clés de secours, séparées par des virgules
     elevenlabs_model: str = "eleven_multilingual_v2"
     # Voix par défaut des nouvelles chaînes (Adam, voix "premade").
     elevenlabs_default_voice_id: str = "pNInz6obpgDQGcFmaJgB"

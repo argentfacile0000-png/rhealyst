@@ -21,10 +21,13 @@ from .publishers import PLATFORM_LABELS, PublisherError, PublishRequest, instagr
 from .story import StoryGenerator
 from .story.styles import FORMATS, get_language
 from .tts import ElevenLabsClient, VoiceSettings
+from .tts.keys import KeyRing
 from .video.background import BackgroundBank
 from .video.captions import CaptionStyle, build_ass, hook_end_time
 from .video.card import render_cover, render_hook_card
+from .video.ffmpeg import probe_dimensions
 from .video.renderer import RenderJob, grab_frame, make_telegram_preview, make_thumbnail, render
+from .video.split import cut_part, plan_cuts, words_between
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +65,9 @@ class Pipeline:
         self.settings = settings
         self.notifier = notifier
         self.stories = StoryGenerator(settings)
-        self.tts = ElevenLabsClient(settings.elevenlabs_api_key, settings.elevenlabs_model, ffmpeg=settings.ffmpeg_bin)
+        self.tts = ElevenLabsClient(settings.elevenlabs_api_key, settings.elevenlabs_model, ffmpeg=settings.ffmpeg_bin,
+                                    keys=KeyRing(settings))
+        self.tts.on_event = self._tts_event
         self.bank = BackgroundBank(settings.backgrounds_dir, ffprobe=settings.ffprobe_bin)
         # Branchés par Services : file de publication et adresse publique signée d'une vidéo.
         self.enqueue_publish: Callable[[int], object] | None = None
@@ -128,6 +133,13 @@ class Pipeline:
                 vid = await self._render_part(ch, story_id, gs.title, gs.hook, i, len(gs.parts), text, progress, rng,
                                               kind=kind)
                 video_ids.append(vid)
+            # Découpage auto des Shorts trop longs en parties (Partie 1, 2…)
+            if not long_form and len(video_ids) == 1 and ch.split_seconds:
+                v = await self._get_video(video_ids[0])
+                if v and v.duration > ch.split_seconds + 2:
+                    await progress.update("finish", "run", detail=f"découpage en parties de {ch.split_seconds} s max")
+                    video_ids = await self.split_video(video_ids[0], ch.split_seconds, status=VideoStatus.RENDERING)
+                    await progress.update("finish", "done", detail=f"{len(video_ids)} parties")
         except Exception as exc:
             # Une série incomplète ne doit pas être publiée : les parties déjà montées passent en échec.
             if video_ids:
@@ -291,6 +303,7 @@ class Pipeline:
                 v.bg_file = str(seg.path)
                 v.bg_start = seg.start
                 v.tts_chars = tts.characters
+                v.words = [[w.text, round(w.start, 3), round(w.end, 3)] for w in tts.words]
             shutil.rmtree(workdir, ignore_errors=True)
             return video_id
         except Exception as exc:
@@ -300,6 +313,79 @@ class Pipeline:
                     v.status = VideoStatus.FAILED
                     v.error = str(exc)[:1000]
             raise
+
+    async def _tts_event(self, text: str) -> None:
+        await db.log_event(text, "warning")
+        await self.notifier.notify(f"<b>ElevenLabs</b>\n\n{text}", "warning")
+
+    async def _get_video(self, video_id: int) -> Video | None:
+        async with db.session() as s:
+            return await s.get(Video, video_id)
+
+    async def split_video(self, video_id: int, max_seconds: int, *, status: str | None = None) -> list[int]:
+        """Découpe une vidéo en parties de max_seconds au plus (fins de phrase), label « PARTIE N ».
+
+        Les parties remplacent la vidéo, qui est archivée (donc restaurable). Retourne les ids des parties.
+        """
+        async with db.session() as s:
+            orig = await s.get(Video, video_id)
+            if orig is None or not orig.file_path or not Path(orig.file_path).exists():
+                raise ValueError("Vidéo introuvable ou fichier supprimé")
+            if orig.part_count > 1:
+                raise ValueError("Cette vidéo fait déjà partie d'une série")
+            if orig.format == VideoFormat.HORIZONTAL:
+                raise ValueError("Les vidéos longues ne se découpent pas")
+            story = await s.get(Story, orig.story_id)
+            ch = await s.get(Channel, orig.channel_id)
+        segments = plan_cuts(orig.words, orig.duration, max_seconds)
+        if len(segments) < 2:
+            raise ValueError(f"La vidéo dure déjà moins de {max_seconds} s")
+        lang = get_language(story.language if story else ch.language)
+        src = Path(orig.file_path)
+        dims = (await probe_dimensions(src, self.settings.ffprobe_bin)) or (self.settings.video_width, self.settings.video_height)
+        workdir = self.settings.work_dir / f"split_{video_id}"
+        new_status = status or orig.status
+        n = len(segments)
+        ids: list[int] = []
+        try:
+            for i, (a, b) in enumerate(segments, start=1):
+                out = src.with_name(f"{src.stem}-p{i}.mp4")
+                await cut_part(src, out, a, b, f"{lang.part_word} {i}", width=dims[0], height=dims[1],
+                               workdir=workdir, settings=self.settings)
+                thumb = await make_thumbnail(out, out.with_suffix(".jpg"), self.settings, at=min(2.0, (b - a) / 3))
+                preview = await make_telegram_preview(out, out.with_name(out.stem + "_preview.mp4"), self.settings,
+                                                      duration=b - a)
+                part_words = words_between(orig.words, a, b)
+                async with db.session() as s:
+                    v = Video(
+                        channel_id=orig.channel_id, story_id=orig.story_id, format=orig.format,
+                        part_index=i, part_count=n, status=new_status, title=orig.title,
+                        text=" ".join(w[0] for w in part_words) or orig.text,
+                        file_path=str(out), thumb_path=str(thumb), preview_path=str(preview),
+                        duration=round(b - a, 3), file_size=out.stat().st_size,
+                        bg_file=orig.bg_file, bg_start=orig.bg_start + a, words=part_words,
+                        note=f"Partie {i}/{n} de la vidéo #{video_id}",
+                    )
+                    s.add(v)
+                    await s.flush()
+                    ids.append(v.id)
+        except Exception:
+            async with db.session() as s:  # pas de série incomplète
+                for vid in ids:
+                    v = await s.get(Video, vid)
+                    if v:
+                        v.status = VideoStatus.FAILED
+                        v.error = "Découpage interrompu"
+            raise
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        async with db.session() as s:
+            o = await s.get(Video, video_id)
+            o.archived_from = o.status if o.status != VideoStatus.ARCHIVED else o.archived_from
+            o.status = VideoStatus.ARCHIVED
+            o.note = f"Découpée en {n} parties : " + ", ".join(f"#{i}" for i in ids)
+        await db.log_event(f"{ch.name} : vidéo #{video_id} découpée en {n} parties", "info", ch.id)
+        return ids
 
     # ------------------------------------------------------------------ publication
     async def publish(self, video_id: int) -> None:

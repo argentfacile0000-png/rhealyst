@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
@@ -11,7 +11,7 @@ from telegram import InlineKeyboardMarkup
 
 from .. import db
 from ..models import Channel, Publication, PubStatus, Story, Video, VideoFormat, VideoStatus
-from ..stats import human_delta, overview, tz
+from ..stats import human_delta, overview, to_local, tz
 from ..story.styles import FORMATS, get_language
 from ..version import auto_update_flag, deployed_version
 from .fields import FIELD_MAP, GROUPS, fields_in
@@ -214,7 +214,7 @@ async def channel_view(svc: Services, cid: int) -> Screen:
 
     rows = [
         [("Mettre en pause" if ch.active else "Activer", f"ct:{cid}"), ("Générer", f"cg:{cid}")],
-        [("Réglages", f"ce:{cid}"), ("Vidéos", f"cvv:{cid}:0")],
+        [("Réglages", f"ce:{cid}"), ("Vidéos", f"cvv:{cid}:0"), ("Archives", f"cva:{cid}:0")],
         [("Comptes", f"ca:{cid}"), ("Publier la suivante", f"cp:{cid}")],
         [("Supprimer", f"cd:{cid}")],
         nav("cl", "← Chaînes"),
@@ -351,17 +351,20 @@ async def voice_picker(svc: Services, cid: int, voices: list[dict], page: int) -
 
 
 # ---------------------------------------------------------------------------- vidéos
-async def channel_videos(svc: Services, cid: int, page: int = 0) -> Screen:
+async def channel_videos(svc: Services, cid: int, page: int = 0, archived: bool = False) -> Screen:
     ch = await svc.get_channel(cid)
     zone = tz(svc)
     per = 8
+    flt = (Video.status == VideoStatus.ARCHIVED) if archived else (Video.status != VideoStatus.ARCHIVED)
     async with db.session() as s:
         vids = list((await s.execute(
-            select(Video).where(Video.channel_id == cid).order_by(Video.id.desc()).offset(page * per).limit(per + 1)
+            select(Video).where(Video.channel_id == cid, flt).order_by(Video.id.desc()).offset(page * per).limit(per + 1)
         )).scalars().all())
     more = len(vids) > per
     vids = vids[:per]
-    lines = [title("Vidéos", ch.name if ch else "?"), ""]
+    lines = [title("Archives" if archived else "Vidéos", ch.name if ch else "?"), ""]
+    if archived:
+        lines += [muted("Vidéos mises de côté, sans décision. Désarchive-les pour les remettre en circuit."), ""]
     rows = []
     for v in vids:
         glyph, label = VIDEO_STATUS.get(v.status, ("·", v.status))
@@ -373,12 +376,13 @@ async def channel_videos(svc: Services, cid: int, page: int = 0) -> Screen:
         lines.append("")
         rows.append([(f"{glyph} #{v.id}  {short(v.title, 32)}", f"v:{v.id}")])
     if not vids:
-        lines.append(muted("Aucune vidéo pour l'instant."))
+        lines.append(muted("Aucune vidéo archivée." if archived else "Aucune vidéo pour l'instant."))
+    head = "cva" if archived else "cvv"
     pager = []
     if page > 0:
-        pager.append(("← Récentes", f"cvv:{cid}:{page - 1}"))
+        pager.append(("← Récentes", f"{head}:{cid}:{page - 1}"))
     if more:
-        pager.append(("Anciennes →", f"cvv:{cid}:{page + 1}"))
+        pager.append(("Anciennes →", f"{head}:{cid}:{page + 1}"))
     if pager:
         rows.append(pager)
     rows.append([(BACK, f"cv:{cid}"), (HOME, "h")])
@@ -426,6 +430,11 @@ async def video_caption(svc: Services, video_id: int, *, with_text: bool = False
             else:
                 line += esc(state)
             lines.append(line)
+    if v.status == VideoStatus.SCHEDULED and v.scheduled_at:
+        when = human_when(v.scheduled_at, zone)
+        lines += ["", f"Programmée <b>{esc(when)}</b>"]
+    if v.note:
+        lines += ["", muted(v.note)]
     if v.error and v.status == VideoStatus.FAILED:
         lines += ["", f"{CROSS} {esc(short(v.error, 200))}"]
     lines.append("")
@@ -436,20 +445,40 @@ async def video_caption(svc: Services, video_id: int, *, with_text: bool = False
     return "\n".join(lines)
 
 
+def can_split(video: Video) -> bool:
+    return (video.format != VideoFormat.HORIZONTAL and video.part_count == 1 and bool(video.file_path)
+            and video.duration > 45 and video.status in (VideoStatus.PENDING_APPROVAL, VideoStatus.READY,
+                                                         VideoStatus.ARCHIVED, VideoStatus.FAILED))
+
+
 def video_keyboard(video: Video, *, nav: bool = True) -> InlineKeyboardMarkup:  # noqa: F811
     show_nav = nav
     vid = video.id
+    st = video.status
     rows: list[list] = []
-    if video.status == VideoStatus.PENDING_APPROVAL:
+    if st == VideoStatus.PENDING_APPROVAL:
         rows.append([("Publier maintenant", f"vn:{vid}"), ("Valider", f"va:{vid}")])
-        rows.append([("Régénérer", f"vr:{vid}"), ("Jeter", f"vx:{vid}")])
-    elif video.status == VideoStatus.READY:
-        rows.append([("Publier maintenant", f"vn:{vid}"), ("Jeter", f"vx:{vid}")])
-    elif video.status in (VideoStatus.FAILED, VideoStatus.PUBLISHED) and video.file_path:
+        rows.append([("Programmer", f"vsc:{vid}"), ("Régénérer", f"vr:{vid}")])
+        rows.append([("Archiver", f"var:{vid}"), ("Jeter", f"vx:{vid}")])
+    elif st == VideoStatus.READY:
+        rows.append([("Publier maintenant", f"vn:{vid}"), ("Programmer", f"vsc:{vid}")])
+        rows.append([("Archiver", f"var:{vid}"), ("Jeter", f"vx:{vid}")])
+    elif st == VideoStatus.SCHEDULED:
+        rows.append([("Publier maintenant", f"vn:{vid}"), ("Changer la date", f"vsc:{vid}")])
+        rows.append([("Annuler la programmation", f"vsu:{vid}"), ("Archiver", f"var:{vid}")])
+    elif st == VideoStatus.ARCHIVED:
+        rows.append([("Désarchiver", f"vua:{vid}"), ("Programmer", f"vsc:{vid}")] if video.file_path
+                    else [("Désarchiver", f"vua:{vid}")])
+        rows.append([("Jeter", f"vx:{vid}")])
+    elif st in (VideoStatus.FAILED, VideoStatus.PUBLISHED) and video.file_path:
         rows.append([("Republier les échecs", f"vn:{vid}"), ("Jeter", f"vx:{vid}")])
+        if st == VideoStatus.FAILED:
+            rows.append([("Archiver", f"var:{vid}")])
     extra = [("Texte complet", f"vt:{vid}")]
     if video.file_path or video.preview_path:
         extra.insert(0, ("Aperçu", f"vf:{vid}"))
+    if can_split(video):
+        extra.append(("Découper", f"vsp:{vid}"))
     rows.append(extra)
     if show_nav:
         rows.append([("Chaîne", f"cv:{video.channel_id}"), (HOME, "h")])
@@ -491,6 +520,20 @@ async def queue(svc: Services) -> Screen:
             lines.append(muted(f"{label} · {short(name, 28)}"))
             if len(rows) < 8:
                 rows.append([(f"{glyph} #{v.id}  {short(v.title, 32)}", f"v:{v.id}")])
+
+    async with db.session() as s:
+        planned = list((await s.execute(
+            select(Video).where(Video.status == VideoStatus.SCHEDULED).order_by(Video.scheduled_at).limit(10)
+        )).scalars().all())
+    if planned:
+        lines += ["", f"<b>Programmées</b>  {muted(str(len(planned)))}"]
+        for v in planned:
+            name = chs[v.channel_id].name if v.channel_id in chs else "?"
+            when = human_when(v.scheduled_at, zone) if v.scheduled_at else "?"
+            lines.append(f"#{v.id}  {esc(short(v.title, 40))}")
+            lines.append(muted(f"{when} · {short(name, 28)}"))
+            if len(rows) < 10:
+                rows.append([(f"◷ #{v.id}  {short(v.title, 32)}", f"v:{v.id}")])
 
     upcoming = svc.scheduler.upcoming(8)
     if upcoming:
@@ -591,6 +634,7 @@ async def settings_screen(svc: Services) -> Screen:
     rows = [
         [("Reprendre" if paused else "Pause globale", "sp"), ("Suivi en direct", "slv")],
         [("Diagnostic", "stt"), ("Journal", "ev")],
+        [("Clés ElevenLabs", "ek")],
     ]
     if version:
         auto = s.auto_update and not auto_update_flag(s.data_dir).exists()
@@ -615,3 +659,87 @@ async def events(svc: Services) -> Screen:
     if not evs:
         lines.append(muted("Rien pour l'instant."))
     return "\n".join(lines)[:4000], kb([[("Actualiser", "ev"), (HOME, "h")]])
+
+
+# ---------------------------------------------------------------------------- découpage / programmation
+async def split_menu(svc: Services, video_id: int) -> Screen:
+    v = await svc.get_video(video_id)
+    if v is None or not can_split(v):
+        return "Cette vidéo ne peut pas être découpée.", kb([nav()])
+    lines = [title("Découper", f"#{v.id}"), "", f"Durée : <b>{mmss(v.duration)}</b>",
+             "Chaque partie est coupée en fin de phrase, avec « Partie N » en haut, et suit le même parcours "
+             "(validation ou stock). La vidéo entière est archivée.", ""]
+    rows, line = [], []
+    for sec in (60, 90, 120):
+        n = max(1, -(-int(v.duration) // sec))
+        if n < 2:
+            continue
+        lines.append(f"Parties de {sec} s max  {muted(f'{n} parties')}")
+        line.append((f"{sec} s max", f"vsx:{video_id}:{sec}"))
+    if line:
+        rows.append(line)
+    else:
+        lines.append(muted("Trop courte pour être découpée."))
+    rows.append([(BACK, f"v:{video_id}")])
+    return "\n".join(lines), kb(rows)
+
+
+def schedule_prompt(video: Video, channel_tz: str) -> str:
+    from ..dates import EXAMPLES
+
+    return (f"{title('Programmer', f'#{video.id}')}\n\nQuand publier cette vidéo ?\n"
+            f"Envoie une date et une heure, ou choisis ci-dessous.\n\n{muted('Exemples : ' + EXAMPLES)}\n"
+            f"{muted('Fuseau : ' + channel_tz)}")
+
+
+def schedule_keyboard(video_id: int) -> InlineKeyboardMarkup:
+    return kb([
+        [("Ce soir 20:00", f"vsq:{video_id}:t20"), ("Demain 12:00", f"vsq:{video_id}:d12")],
+        [("Demain 18:00", f"vsq:{video_id}:d18"), ("Demain 21:00", f"vsq:{video_id}:d21")],
+        [("Annuler", f"v:{video_id}")],
+    ])
+
+
+def human_when(dt_utc, zone) -> str:
+    local = to_local(dt_utc, zone)
+    days = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+    return f"{days[local.weekday()]} {local:%d/%m} à {local:%H:%M}"
+
+
+# ---------------------------------------------------------------------------- clés ElevenLabs
+async def elevenlabs_keys(svc: Services) -> Screen:
+    q = await svc.elevenlabs_quota(refresh=True)
+    ring = svc.pipeline.tts.keys
+    zone = tz(svc)
+    lines = [title("Clés ElevenLabs"), "",
+             muted("Quand une clé n'a plus de crédits, la suivante prend le relais automatiquement. "
+                   "Les clés ajoutées ici restent sur ton serveur."), ""]
+    rows: list[list] = []
+    details = (q or {}).get("keys", [])
+    if not details:
+        lines.append(muted("Aucune clé configurée."))
+    for i, d in enumerate(details, start=1):
+        source = ".env" if d["source"] == "env" else "ajoutée depuis le bot"
+        if d.get("status"):
+            until = datetime.fromtimestamp(d["status"].get("until", 0), timezone.utc).replace(tzinfo=None)
+            state = ("invalide" if d["status"].get("reason") == "invalid_api_key"
+                     else f"épuisée jusqu'au {to_local(until, zone):%d/%m}")
+        elif "limit" in d:
+            state = f"{num(max(0, d['limit'] - d['used']))} caractères restants sur {num(d['limit'])}"
+        else:
+            state = f"erreur : {d.get('error', '?')}"
+        current = "  " + muted("en cours") if ring and ring.current == d["kid"] else ""
+        lines.append(f"<b>{i}. {esc(d['masked'])}</b>  {muted(source)}{current}")
+        lines.append(f"    {esc(state)}")
+        btns = []
+        if d.get("status"):
+            btns.append((f"Réactiver la clé {i}", f"ekr:{d['kid']}"))
+        if d["source"] == "bot":
+            btns.append((f"Retirer la clé {i}", f"ekd:{d['kid']}"))
+        if btns:
+            rows.append(btns)
+    if q and q.get("limit"):
+        lines += ["", row("Total", f"{num(max(0, q['limit'] - q['used']))} caractères restants")]
+    rows.insert(0, [("Ajouter une clé", "eka")])
+    rows.append([("← Réglages", "set"), (HOME, "h")])
+    return "\n".join(lines), kb(rows)

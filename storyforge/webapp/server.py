@@ -119,6 +119,11 @@ def create_app(svc: Services) -> FastAPI:
             svc.enqueue_publish(vid, v.channel_id)
         elif action == "discard":
             await svc.discard(vid)
+        elif action in ("archive", "unarchive"):
+            try:
+                await (svc.archive(vid) if action == "archive" else svc.unarchive(vid))
+            except ValueError as exc:
+                raise HTTPException(400, str(exc))
         else:
             raise HTTPException(400, "Action inconnue")
         notifier = svc.notifier

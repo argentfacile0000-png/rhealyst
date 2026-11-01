@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+import asyncio
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from sqlalchemy import select
 
 from . import db
-from .models import Channel, VideoFormat
+from .models import Channel, Video, VideoFormat, VideoStatus
 
 if TYPE_CHECKING:
     from .core import Services
@@ -57,8 +59,39 @@ class Scheduler:
         )
         async with db.session() as sess:
             channels = (await sess.execute(select(Channel))).scalars().all()
+            scheduled = (await sess.execute(
+                select(Video.id, Video.scheduled_at).where(Video.status == VideoStatus.SCHEDULED)
+            )).all()
         for ch in channels:
             self.sync_channel(ch)
+        # Publications programmées : recréées après un redémarrage (rattrapées si l'heure est passée)
+        for vid, when in scheduled:
+            if when is None:
+                continue
+            self.schedule_video(vid, when)
+
+    def schedule_video(self, video_id: int, when_utc: datetime) -> None:
+        """Publication ponctuelle d'une vidéo (when_utc : UTC naïf ou conscient)."""
+        if not self.sched:
+            return
+        when = when_utc if when_utc.tzinfo else when_utc.replace(tzinfo=timezone.utc)
+        if when <= datetime.now(timezone.utc):
+            asyncio.get_running_loop().create_task(self.svc.publish_scheduled(video_id))
+            return
+        self.sched.add_job(
+            self.svc.publish_scheduled, DateTrigger(run_date=when), args=[video_id], id=f"pub:{video_id}",
+            replace_existing=True, misfire_grace_time=None,
+        )
+
+    def unschedule_video(self, video_id: int) -> None:
+        if self.sched and self.sched.get_job(f"pub:{video_id}"):
+            self.sched.remove_job(f"pub:{video_id}")
+
+    def scheduled_runs(self) -> list[tuple[datetime, int]]:
+        if not self.sched:
+            return []
+        return sorted((j.next_run_time, int(j.id.split(":")[1])) for j in self.sched.get_jobs()
+                      if j.id.startswith("pub:") and j.next_run_time)
 
     async def stop(self) -> None:
         if self.sched:

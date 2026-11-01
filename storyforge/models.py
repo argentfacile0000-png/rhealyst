@@ -25,9 +25,14 @@ class VideoStatus:
     PUBLISHED = "published"
     FAILED = "failed"
     DISCARDED = "discarded"
+    ARCHIVED = "archived"  # mise de côté, sans décision (restaurable)
+    SCHEDULED = "scheduled"  # publication programmée à une date précise
 
     # Vidéos "dans le tuyau" (comptent dans le buffer d'une chaîne).
     IN_BUFFER = (RENDERING, PENDING_APPROVAL, READY)
+    # Statuts qu'on peut archiver / programmer
+    ARCHIVABLE = (PENDING_APPROVAL, READY, FAILED, SCHEDULED)
+    SCHEDULABLE = (PENDING_APPROVAL, READY, FAILED, ARCHIVED, SCHEDULED)
 
 
 class VideoFormat:
@@ -76,6 +81,7 @@ class Channel(Base):
     min_seconds: Mapped[int] = mapped_column(Integer, default=65)
     max_seconds: Mapped[int] = mapped_column(Integer, default=95)
     parts: Mapped[int] = mapped_column(Integer, default=1)
+    split_seconds: Mapped[int] = mapped_column(Integer, default=0)  # découpage auto des Shorts (0 = désactivé)
     caption_style: Mapped[str] = mapped_column(String(16), default="pop")  # pop | trio
     caption_color: Mapped[str] = mapped_column(String(9), default="#FFFFFF")
     highlight_color: Mapped[str] = mapped_column(String(9), default="#FFE14D")
@@ -198,6 +204,10 @@ class Video(Base):
     bg_start: Mapped[float] = mapped_column(Float, default=0.0)
     tts_chars: Mapped[int] = mapped_column(Integer, default=0)
     publish_after: Mapped[bool] = mapped_column(Boolean, default=False)
+    words: Mapped[list | None] = mapped_column(JSON, nullable=True)  # [[mot, début, fin], ...] sur la vidéo
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # UTC
+    archived_from: Mapped[str] = mapped_column(String(20), default="")  # statut avant archivage
+    note: Mapped[str] = mapped_column(String(300), default="")
     error: Mapped[str] = mapped_column(Text, default="")
     tg_messages: Mapped[list[list[int]]] = mapped_column(JSON, default=list)  # [[chat_id, message_id], ...]
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
