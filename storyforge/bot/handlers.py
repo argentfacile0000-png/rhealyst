@@ -22,12 +22,13 @@ from telegram.ext import (
 )
 
 from .. import db
-from ..models import VideoStatus
+from ..models import VideoFormat, VideoStatus
 from ..publishers import PublisherError
+from ..version import auto_update_flag
 from ..video.background import VIDEO_EXTS
 from . import screens
 from .fields import FIELD_MAP
-from .ui import esc, kb
+from .ui import PLATFORM, esc, kb
 
 if TYPE_CHECKING:
     from ..core import Services
@@ -154,7 +155,7 @@ def _missing_prereqs(svc: Services) -> list[str]:
     return svc.missing_prereqs()
 
 
-async def start_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: int) -> None:
+async def start_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: int, kind: str | None = None) -> None:
     svc = svc_of(context)
     q = update.callback_query
     missing = _missing_prereqs(svc)
@@ -165,10 +166,20 @@ async def start_generation(update: Update, context: ContextTypes.DEFAULT_TYPE, c
     if ch is None:
         await q.answer("Chaîne introuvable", show_alert=True)
         return
+    if kind is None:
+        enabled = ch.formats_enabled()
+        if len(enabled) > 1:  # Shorts et vidéos longues : on demande le format
+            await q.answer()
+            await show(update, context, await screens.generate_kind(svc, cid))
+            return
+        kind = enabled[0] if enabled else VideoFormat.VERTICAL
+    long_form = kind == VideoFormat.HORIZONTAL
     ahead = svc.jobs.count(kind="generate")
-    await q.answer("Génération lancée" + (f", après {ahead} tâche(s)" if ahead else ""))
-    progress = await notifier_of(context).progress(f"Génération · {ch.name}", chat_id=update.effective_chat.id)
-    svc.enqueue_generate(cid, progress=progress, label=f"Manuel · {ch.name}")
+    await q.answer(("Vidéo longue lancée" if long_form else "Génération lancée")
+                   + (f", après {ahead} tâche(s)" if ahead else ""))
+    title = f"{'Vidéo longue' if long_form else 'Génération'} · {ch.name}"
+    progress = await notifier_of(context).progress(title, chat_id=update.effective_chat.id)
+    svc.enqueue_generate(cid, kind=kind, progress=progress, label=f"Manuel · {title}")
 
 
 # ---------------------------------------------------------------------------- vidéos
@@ -211,7 +222,7 @@ async def video_action(update: Update, context: ContextTypes.DEFAULT_TYPE, actio
             await q.answer("Fichier vidéo supprimé", show_alert=True)
             return
         ch = await svc.get_channel(v.channel_id)
-        if not ch or not ch.platforms():
+        if not ch or not ch.platforms(v.format):
             await q.answer("Aucune plateforme liée/activée pour cette chaîne", show_alert=True)
             return
         job = svc.enqueue_publish(vid, v.channel_id)
@@ -230,7 +241,7 @@ async def video_action(update: Update, context: ContextTypes.DEFAULT_TYPE, actio
             return
         await svc.discard(vid)
         await refresh_video(update, context, vid)
-        await start_generation(update, context, v.channel_id)
+        await start_generation(update, context, v.channel_id, v.format)
     elif action == "vf":
         await q.answer("Envoi de l'aperçu…")
         await notifier_of(context).send_video_message(update.effective_chat.id, vid, nav=True)
@@ -244,22 +255,28 @@ async def link_account(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: 
     svc = svc_of(context)
     q = update.callback_query
     ch = await svc.get_channel(cid)
-    s = svc.settings
+    docs = {
+        "youtube": "Crée un client OAuth « Application de bureau » dans Google Cloud Console (API YouTube Data v3 "
+                   "activée), télécharge le JSON et place-le dans <code>secrets/google_client_secret.json</code>.",
+        "tiktok": "Crée une app sur developers.tiktok.com (Login Kit + Content Posting API), puis renseigne "
+                  "<code>TIKTOK_CLIENT_KEY</code>, <code>TIKTOK_CLIENT_SECRET</code> et <code>TIKTOK_REDIRECT_URI</code>.",
+        "instagram": "Crée une app sur developers.facebook.com (produit Instagram, connexion Instagram), renseigne "
+                     "<code>INSTAGRAM_APP_ID</code> et <code>INSTAGRAM_APP_SECRET</code>, et active PUBLIC_URL (https).",
+    }
     try:
-        url = svc.youtube_auth_url(cid) if platform == "youtube" else svc.tiktok_auth_url(cid)
+        problem = svc.platform_problem(platform, cid)
+        if problem and platform == "instagram":
+            raise PublisherError(problem)
+        url = svc.auth_url(platform, cid)
     except PublisherError as exc:
         await q.answer()
-        doc = ("Crée un client OAuth « Application de bureau » dans Google Cloud Console (API YouTube Data v3 activée), "
-               "télécharge le JSON et place-le dans <code>secrets/google_client_secret.json</code>."
-               if platform == "youtube" else
-               "Crée une app sur developers.tiktok.com (Login Kit + Content Posting API), puis renseigne "
-               "<code>TIKTOK_CLIENT_KEY</code>, <code>TIKTOK_CLIENT_SECRET</code> et <code>TIKTOK_REDIRECT_URI</code>.")
+        doc = docs[platform]
         await show(update, context, (f"<b>Configuration manquante</b>\n\n{esc(exc)}\n\n{doc}",
                                      kb([[("← Comptes", f"ca:{cid}")]])))
         return
     await q.answer()
-    name = "YouTube" if platform == "youtube" else "TikTok"
-    auto = platform == "youtube" and bool(s.webapp_url)
+    name = PLATFORM[platform]
+    auto = svc.oauth_is_automatic(platform, cid)
     steps = [
         f"<b>Connecter {name}</b> · {esc(ch.name)}",
         "",
@@ -363,13 +380,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             asyncio.create_task(svc.refill())
         await show(update, context, await screens.channel_view(svc, cid))
     elif head == "cg":
-        await start_generation(update, context, cid)
+        kind = parts[2] if len(parts) > 2 and parts[2] in (VideoFormat.VERTICAL, VideoFormat.HORIZONTAL) else None
+        await start_generation(update, context, cid, kind)
     elif head == "cp":
-        v = await svc.next_ready_video(cid)
+        v = await svc.next_ready_video(cid, kind=None)
         ch = await svc.get_channel(cid)
         if v is None:
             await q.answer("Aucune vidéo prête (validée) pour cette chaîne", show_alert=True)
-        elif not ch.platforms():
+        elif not ch.platforms(v.format):
             await q.answer("Aucune plateforme liée/activée", show_alert=True)
         else:
             svc.enqueue_publish(v.id, cid)
@@ -408,11 +426,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await link_account(update, context, cid, "youtube")
     elif head == "ck":
         await link_account(update, context, cid, "tiktok")
+    elif head == "ci":
+        await link_account(update, context, cid, "instagram")
     elif head == "cu":
         platform = parts[2]
         await svc.unlink(cid, platform)
         context.user_data.pop("await", None)
-        await q.answer(f"{'YouTube' if platform == 'youtube' else 'TikTok'} déconnecté")
+        await q.answer(f"{PLATFORM.get(platform, platform)} déconnecté")
         await show(update, context, await screens.accounts(svc, cid))
     elif head == "ca":
         await q.answer()
@@ -460,6 +480,17 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         live = bool(await db.kv_get("live_auto", False))
         await db.kv_set("live_auto", not live)
         await q.answer("Suivi en direct " + ("désactivé" if live else "activé"))
+        await show(update, context, await screens.settings_screen(svc))
+    elif head == "sau":
+        flag = auto_update_flag(svc.settings.data_dir)
+        if flag.exists():
+            flag.unlink()
+            await q.answer("Mises à jour automatiques réactivées")
+        else:
+            flag.parent.mkdir(parents=True, exist_ok=True)
+            flag.write_text("1")
+            await q.answer("Mises à jour automatiques suspendues")
+        await db.log_event("Mises à jour auto " + ("suspendues" if flag.exists() else "réactivées"), "info")
         await show(update, context, await screens.settings_screen(svc))
     elif head == "stt":
         await q.answer("Diagnostic en cours…")
@@ -592,7 +623,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             info = await msg.reply_text("Vérification de l'autorisation…")
             res = await svc.complete_oauth_from_url(text)
             context.user_data.pop("await", None)
-            label = "YouTube" if res.platform == "youtube" else "TikTok"
+            label = PLATFORM[res.platform]
             await info.edit_text(f"✓ {label} connecté à « {res.channel.name} » : {res.account}")
             await show(update, context, await screens.accounts(svc, res.channel.id), new=True)
         elif kind == "bg_newcat":

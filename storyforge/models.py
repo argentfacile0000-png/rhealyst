@@ -30,6 +30,11 @@ class VideoStatus:
     IN_BUFFER = (RENDERING, PENDING_APPROVAL, READY)
 
 
+class VideoFormat:
+    VERTICAL = "vertical"  # Shorts / TikTok / Reels (9:16)
+    HORIZONTAL = "horizontal"  # vidéo longue YouTube (16:9)
+
+
 class PubStatus:
     PENDING = "pending"
     UPLOADING = "uploading"
@@ -80,6 +85,14 @@ class Channel(Base):
     music_volume: Mapped[float] = mapped_column(Float, default=0.0)
     bg_volume: Mapped[float] = mapped_column(Float, default=0.0)
 
+    # --- Formats -----------------------------------------------------------
+    shorts_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # vidéos verticales
+    long_enabled: Mapped[bool] = mapped_column(Boolean, default=False)  # vidéos longues YouTube (16:9)
+    long_min_minutes: Mapped[int] = mapped_column(Integer, default=8)
+    long_max_minutes: Mapped[int] = mapped_column(Integer, default=12)
+    long_schedule_times: Mapped[list[str] | None] = mapped_column(JSON, default=lambda: ["20:00"])
+    long_buffer_size: Mapped[int] = mapped_column(Integer, default=1)
+
     # --- Planning ----------------------------------------------------------
     schedule_times: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["12:00", "18:30"])
     timezone: Mapped[str] = mapped_column(String(64), default="Europe/Paris")
@@ -100,6 +113,11 @@ class Channel(Base):
     tiktok_credentials: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     tiktok_account: Mapped[str] = mapped_column(String(120), default="")
 
+    # --- Instagram (Reels) -------------------------------------------------
+    instagram_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    instagram_credentials: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    instagram_account: Mapped[str] = mapped_column(String(120), default="")
+
     @property
     def youtube_linked(self) -> bool:
         return bool(self.youtube_credentials)
@@ -108,12 +126,29 @@ class Channel(Base):
     def tiktok_linked(self) -> bool:
         return bool(self.tiktok_credentials)
 
-    def platforms(self) -> list[str]:
+    @property
+    def instagram_linked(self) -> bool:
+        return bool(self.instagram_credentials)
+
+    def platforms(self, video_format: str = VideoFormat.VERTICAL) -> list[str]:
+        """Plateformes actives et connectées pour un format de vidéo."""
         out = []
         if self.youtube_enabled and self.youtube_linked:
             out.append("youtube")
+        if video_format == VideoFormat.HORIZONTAL:
+            return out  # les vidéos longues ne vont que sur YouTube
         if self.tiktok_enabled and self.tiktok_linked:
             out.append("tiktok")
+        if self.instagram_enabled and self.instagram_linked:
+            out.append("instagram")
+        return out
+
+    def formats_enabled(self) -> list[str]:
+        out = []
+        if self.shorts_enabled:
+            out.append(VideoFormat.VERTICAL)
+        if self.long_enabled and self.youtube_enabled:
+            out.append(VideoFormat.HORIZONTAL)
         return out
 
 
@@ -147,6 +182,7 @@ class Video(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     channel_id: Mapped[int] = mapped_column(ForeignKey("channels.id", ondelete="CASCADE"), index=True)
     story_id: Mapped[int] = mapped_column(ForeignKey("stories.id", ondelete="CASCADE"), index=True)
+    format: Mapped[str] = mapped_column(String(12), default=VideoFormat.VERTICAL, index=True)
     part_index: Mapped[int] = mapped_column(Integer, default=1)
     part_count: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(20), default=VideoStatus.RENDERING, index=True)
@@ -155,6 +191,7 @@ class Video(Base):
     file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     thumb_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     preview_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cover_path: Mapped[str | None] = mapped_column(String(500), nullable=True)  # miniature YouTube (vidéo longue)
     duration: Mapped[float] = mapped_column(Float, default=0.0)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     bg_file: Mapped[str] = mapped_column(String(500), default="")

@@ -10,9 +10,10 @@ from sqlalchemy import func, select
 from telegram import InlineKeyboardMarkup
 
 from .. import db
-from ..models import Channel, Publication, PubStatus, Story, Video, VideoStatus
+from ..models import Channel, Publication, PubStatus, Story, Video, VideoFormat, VideoStatus
 from ..stats import human_delta, overview, tz
 from ..story.styles import FORMATS, get_language
+from ..version import auto_update_flag, deployed_version
 from .fields import FIELD_MAP, GROUPS, fields_in
 from .ui import (
     BACK,
@@ -127,6 +128,17 @@ async def channel_list(svc: Services) -> Screen:
     return "\n".join(lines).rstrip(), kb(rows)
 
 
+async def generate_kind(svc: Services, cid: int) -> Screen:
+    ch = await svc.get_channel(cid)
+    if ch is None:
+        return "Chaîne introuvable.", kb([nav("cl")])
+    lines = [title("Générer", ch.name), "", "Quel format ?", "",
+             row("Short", f"vertical, {ch.min_seconds}–{ch.max_seconds} s") + "  " + muted("YouTube, TikTok, Instagram"),
+             row("Vidéo longue", f"16:9, {ch.long_min_minutes}–{ch.long_max_minutes} min") + "  " + muted("YouTube")]
+    rows = [[("Short", f"cg:{cid}:vertical"), ("Vidéo longue", f"cg:{cid}:horizontal")], [(BACK, f"cv:{cid}")]]
+    return "\n".join(lines), kb(rows)
+
+
 async def generate_picker(svc: Services) -> Screen:
     chs = await svc.list_channels()
     if not chs:
@@ -169,13 +181,17 @@ async def channel_view(svc: Services, cid: int) -> Screen:
         muted(f"{ON} Active" if ch.active else f"{OFF} En pause") + f"  {muted(lang.label)}",
         "",
         "<b>Contenu</b>",
-        row("Formats", _formats_label(ch)),
-        row("Durée", f"{ch.min_seconds}–{ch.max_seconds} s, {plural(ch.parts, 'partie')}"),
+        row("Histoires", _formats_label(ch)),
+        row("Shorts", f"{ch.min_seconds}–{ch.max_seconds} s, {plural(ch.parts, 'partie')}" if ch.shorts_enabled
+            else "désactivés"),
+        row("Vidéos longues", f"{ch.long_min_minutes}–{ch.long_max_minutes} min, YouTube" if ch.long_enabled
+            else "désactivées"),
         row("Voix", f"{ch.voice_name or ch.voice_id or 'par défaut'}"),
         row("Fonds", ", ".join(ch.bg_categories) or "toutes catégories"),
         "",
         "<b>Planning</b>",
         row("Créneaux", ", ".join(ch.schedule_times) or "aucun") + f"  {muted(ch.timezone)}",
+        *([row("Créneaux vidéos longues", ", ".join(ch.long_schedule_times or []) or "aucun")] if ch.long_enabled else []),
         row("Prochain", human_delta(_utc(nxt), zone) if nxt else "—"),
         row("Validation manuelle", "activée" if ch.approval_required else "désactivée"),
         row("Réserve", plural(ch.buffer_size, "vidéo")),
@@ -183,6 +199,7 @@ async def channel_view(svc: Services, cid: int) -> Screen:
         "<b>Plateformes</b>",
         f"YouTube  {plat(ch.youtube_enabled, ch.youtube_linked, ch.youtube_account)}",
         f"TikTok  {plat(ch.tiktok_enabled, ch.tiktok_linked, ch.tiktok_account)}",
+        f"Instagram  {plat(ch.instagram_enabled, ch.instagram_linked, ch.instagram_account)}",
         "",
         "<b>Stock</b>",
         f"{plural(counts.get(VideoStatus.READY, 0), 'prête')}{DOT}"
@@ -193,7 +210,7 @@ async def channel_view(svc: Services, cid: int) -> Screen:
         _, label = VIDEO_STATUS.get(last.status, ("", last.status))
         lines.append(muted(f"Dernière : « {short(last.title, 40)} », {label.lower()}, {human_delta(last.created_at, zone)}"))
     if not ch.platforms():
-        lines += ["", muted("Connecte YouTube ou TikTok dans Comptes pour publier automatiquement.")]
+        lines += ["", muted("Connecte YouTube, TikTok ou Instagram dans Comptes pour publier automatiquement.")]
 
     rows = [
         [("Mettre en pause" if ch.active else "Activer", f"ct:{cid}"), ("Générer", f"cg:{cid}")],
@@ -221,25 +238,23 @@ async def accounts(svc: Services, cid: int) -> Screen:
         "",
         f"YouTube  {state('youtube', ch.youtube_linked, ch.youtube_account, ch.youtube_enabled)}",
         f"TikTok  {state('tiktok', ch.tiktok_linked, ch.tiktok_account, ch.tiktok_enabled)}",
+        f"Instagram  {state('instagram', ch.instagram_linked, ch.instagram_account, ch.instagram_enabled)}",
         "",
     ]
     rows: list[list] = []
     if svc.portal_available():
-        lines.append("Ouvre la page de connexion, puis choisis « Se connecter avec YouTube » ou "
-                     "« Se connecter avec TikTok » et accepte les autorisations.")
+        lines.append("Ouvre la page de connexion, choisis la plateforme et accepte les autorisations.")
         lines.append(muted("Le lien est personnel et expire dans 30 minutes."))
         rows.append([("Ouvrir la page de connexion", svc.portal_link(cid))])
     else:
         lines.append("Choisis la plateforme à connecter. Après l'autorisation, colle ici l'adresse de la page de retour.")
         lines.append(muted("Pour une connexion en un clic, configure PUBLIC_URL et WEBAPP_ENABLED (voir le README)."))
         rows.append([("Connecter YouTube", f"cy:{cid}"), ("Connecter TikTok", f"ck:{cid}")])
-    unlink = []
-    if ch.youtube_linked:
-        unlink.append(("Déconnecter YouTube", f"cu:{cid}:youtube"))
-    if ch.tiktok_linked:
-        unlink.append(("Déconnecter TikTok", f"cu:{cid}:tiktok"))
-    if unlink:
-        rows.append(unlink)
+        rows.append([("Connecter Instagram", f"ci:{cid}")])
+    unlink = [(f"Déconnecter {PLATFORM[p]}", f"cu:{cid}:{p}")
+              for p in ("youtube", "tiktok", "instagram") if getattr(ch, f"{p}_linked")]
+    for i in range(0, len(unlink), 2):
+        rows.append(unlink[i:i + 2])
     rows.append([("← Chaîne", f"cv:{cid}"), (HOME, "h")])
     return "\n".join(lines), kb(rows)
 
@@ -351,6 +366,8 @@ async def channel_videos(svc: Services, cid: int, page: int = 0) -> Screen:
     for v in vids:
         glyph, label = VIDEO_STATUS.get(v.status, ("·", v.status))
         part = f" · partie {v.part_index}/{v.part_count}" if v.part_count > 1 else ""
+        if v.format == VideoFormat.HORIZONTAL:
+            part = " · vidéo longue"
         lines.append(f"<b>#{v.id}</b>  {esc(short(v.title, 44))}")
         lines.append(muted(f"{label}{part} · {human_delta(v.created_at, zone)}"))
         lines.append("")
@@ -380,6 +397,7 @@ async def video_caption(svc: Services, video_id: int, *, with_text: bool = False
     _, label = VIDEO_STATUS.get(v.status, ("", v.status))
     fmt = FORMATS.get(story.format) if story else None
     meta = [x for x in (
+        "vidéo longue" if v.format == VideoFormat.HORIZONTAL else "",
         f"partie {v.part_index}/{v.part_count}" if v.part_count > 1 else "",
         mmss(v.duration),
         fmt.label if fmt else "",
@@ -477,9 +495,10 @@ async def queue(svc: Services) -> Screen:
     upcoming = svc.scheduler.upcoming(8)
     if upcoming:
         lines += ["", "<b>Prochains créneaux</b>"]
-        for when, cid in upcoming:
+        for when, cid, kind in upcoming:
             name = chs[cid].name if cid in chs else f"#{cid}"
-            lines.append(f"{when.astimezone(zone):%d/%m %H:%M}  {esc(short(name, 28))}")
+            tag = "  " + muted("vidéo longue") if kind == VideoFormat.HORIZONTAL else ""
+            lines.append(f"{when.astimezone(zone):%d/%m %H:%M}  {esc(short(name, 28))}{tag}")
     rows.append([("Actualiser", "q"), (HOME, "h")])
     return "\n".join(lines), kb(rows)
 
@@ -568,11 +587,21 @@ async def settings_screen(svc: Services) -> Screen:
         row("Fuseau", s.timezone),
         row("Mini App", s.webapp_url or "non configurée"),
     ]
+    version = deployed_version()
     rows = [
         [("Reprendre" if paused else "Pause globale", "sp"), ("Suivi en direct", "slv")],
         [("Diagnostic", "stt"), ("Journal", "ev")],
-        nav(),
     ]
+    if version:
+        auto = s.auto_update and not auto_update_flag(s.data_dir).exists()
+        lines += [
+            "",
+            "<b>Version</b>",
+            row("Installée", version["short"]) + ("  " + muted(short(version["message"], 60)) if version["message"] else ""),
+            row("Mises à jour auto", "activées, à chaque push GitHub" if auto else "suspendues"),
+        ]
+        rows.append([("Suspendre les mises à jour" if auto else "Réactiver les mises à jour", "sau")])
+    rows.append(nav())
     return "\n".join(lines), kb(rows)
 
 

@@ -41,6 +41,7 @@ class Field:
 
 
 GROUPS: list[tuple[str, str]] = [
+    ("formats", "Formats"),
     ("story", "Histoire"),
     ("voice", "Voix"),
     ("video", "Vidéo"),
@@ -83,6 +84,18 @@ def _tt_account(text: str) -> dict[str, Any]:
     return {"tiktok_account": text.strip().lstrip("@")[:100]}
 
 
+def _long_duration_apply(v: str) -> dict[str, Any]:
+    lo, hi = (int(x) for x in v.split("-"))
+    return {"long_min_minutes": lo, "long_max_minutes": hi}
+
+
+def _long_times(text: str) -> dict[str, Any]:
+    times = parse_times(text)
+    if not times:
+        raise ValueError("Donne au moins une heure, ex : 20:00")
+    return {"long_schedule_times": times[:6]}
+
+
 def _duration_apply(v: str) -> dict[str, Any]:
     lo, hi = (int(x) for x in v.split("-"))
     return {"min_seconds": lo, "max_seconds": hi}
@@ -92,6 +105,19 @@ COLORS = [("Blanc", "#FFFFFF"), ("Jaune", "#FFE14D"), ("Vert", "#4DFF88"), ("Cya
           ("Rose", "#FF6FD8"), ("Orange", "#FF9F1C")]
 
 FIELDS: list[Field] = [
+    # --- Formats
+    Field("shorts_enabled", "Shorts verticaux (YouTube, TikTok, Reels)", "formats", "toggle"),
+    Field("long_enabled", "Vidéos longues YouTube (16:9)", "formats", "toggle"),
+    Field("long_duration", "Durée des vidéos longues", "formats", "choice",
+          options=[("5–8 min", "5-8"), ("8–12 min", "8-12"), ("12–20 min", "12-20"), ("20–30 min", "20-30")],
+          current=lambda c: f"{c.long_min_minutes}-{c.long_max_minutes}",
+          show=lambda c: f"{c.long_min_minutes}–{c.long_max_minutes} min", apply=_long_duration_apply),
+    Field("long_schedule_times", "Horaires des vidéos longues", "formats", "text", parse=_long_times,
+          show=lambda c: ", ".join(c.long_schedule_times or []) or "aucun",
+          hint="Envoie les heures de publication des vidéos longues.\n<i>Exemple : 20:00</i>\n\n"
+               "<i>Une minute de narration consomme environ 1 000 à 1 500 caractères ElevenLabs.</i>"),
+    Field("long_buffer_size", "Réserve de vidéos longues", "formats", "choice",
+          options=[("1", 1), ("2", 2), ("3", 3)]),
     # --- Histoire
     Field("name", "Nom", "story", "text", parse=_name, hint="Envoie le nouveau nom de la chaîne."),
     Field("language", "Langue", "story", "choice",
@@ -156,6 +182,7 @@ FIELDS: list[Field] = [
     Field("tiktok_privacy", "Visibilité TikTok", "pub", "choice",
           options=[("Tout le monde", "PUBLIC_TO_EVERYONE"), ("Abonnés", "FOLLOWER_OF_CREATOR"),
                    ("Amis", "MUTUAL_FOLLOW_FRIENDS"), ("Moi seul", "SELF_ONLY")]),
+    Field("instagram_enabled", "Instagram", "pub", "toggle"),
     Field("tiktok_account", "Pseudo TikTok", "pub", "text", parse=_tt_account,
           show=lambda c: f"@{c.tiktok_account}" if c.tiktok_account else "non défini",
           hint="Envoie ton pseudo TikTok (il sert à construire les liens des vidéos)."),

@@ -165,7 +165,8 @@ async def test_full_dashboard_navigation(svc, tmp_path):
     await click(ctx, "x")
 
     # Activation + génération manuelle avec progression live
-    await svc.update_channel(cid, parts=1, min_seconds=5, max_seconds=6, approval_required=True)
+    await svc.update_channel(cid, parts=1, min_seconds=5, max_seconds=6, approval_required=True,
+                             shorts_enabled=True, long_enabled=False, youtube_enabled=True)
     await click(ctx, f"ct:{cid}")
     await click(ctx, f"cg:{cid}")
     await svc.jobs._queues["generate"].join()

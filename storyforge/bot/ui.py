@@ -44,7 +44,7 @@ PUB_STATUS = {
     PubStatus.FAILED: "échec",
 }
 
-PLATFORM = {"youtube": "YouTube", "tiktok": "TikTok"}
+PLATFORM = {"youtube": "YouTube", "tiktok": "TikTok", "instagram": "Instagram"}
 
 
 def esc(value: Any) -> str:

@@ -103,7 +103,8 @@ async def channel_title(info: dict) -> tuple[str, dict]:
 def _build_description(req: PublishRequest) -> str:
     tags = " ".join(f"#{t}" for t in req.tags[:8])
     desc = req.description.strip()
-    return f"{desc}\n\n{tags} #shorts".strip()[:4900]
+    shorts = " #shorts" if req.kind != "horizontal" else ""
+    return f"{desc}\n\n{tags}{shorts}".strip()[:4900]
 
 
 def _upload_sync(info: dict, req: PublishRequest) -> PublishResult:
@@ -154,6 +155,14 @@ def _upload_sync(info: dict, req: PublishRequest) -> PublishResult:
         raise PublisherError(f"YouTube a refusé l'upload : {reason}", retryable=exc.resp.status >= 500) from exc
 
     vid = response.get("id", "")
+    if vid and req.thumbnail_path:
+        # Miniature personnalisée (vidéo longue). Nécessite une chaîne validée par téléphone : non bloquant.
+        try:
+            yt.thumbnails().set(
+                videoId=vid, media_body=MediaFileUpload(req.thumbnail_path, mimetype="image/jpeg")
+            ).execute()
+        except HttpError as exc:
+            log.warning("Miniature YouTube refusée (%s) : la vidéo reste publiée", exc.resp.status)
     return PublishResult(
         status="published",
         remote_id=vid,

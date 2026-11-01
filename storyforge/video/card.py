@@ -103,3 +103,35 @@ def render_hook_card(title: str, channel_name: str, out_path: Path, fonts_dir: P
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path)
     return out_path
+
+
+def render_cover(frame: Path, title: str, out_path: Path, fonts_dir: Path, *, size: tuple[int, int] = (1280, 720)) -> Path:
+    """Miniature YouTube 16:9 : image du fond assombrie + titre en grand (vidéo longue)."""
+    W, H = size
+    img = Image.open(frame).convert("RGB")
+    scale = max(W / img.width, H / img.height)
+    img = img.resize((int(img.width * scale) + 1, int(img.height * scale) + 1))
+    left, top = (img.width - W) // 2, (img.height - H) // 2
+    img = img.crop((left, top, left + W, top + H))
+    shade = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shade)
+    for y in range(H):  # dégradé sombre vers le bas pour la lisibilité
+        sd.line([(0, y), (W, y)], fill=(0, 0, 0, int(40 + 150 * (y / H))))
+    img = Image.alpha_composite(img.convert("RGBA"), shade)
+    d = ImageDraw.Draw(img)
+    size_px = 92
+    font = _font(fonts_dir, "Montserrat-Black.ttf", size_px)
+    lines = _wrap(d, title.upper(), font, W - 120)
+    while len(lines) > 3 and size_px > 56:
+        size_px -= 8
+        font = _font(fonts_dir, "Montserrat-Black.ttf", size_px)
+        lines = _wrap(d, title.upper(), font, W - 120)
+    lines = lines[:3]
+    line_h = int(size_px * 1.12)
+    y = H - 70 - line_h * len(lines)
+    for line in lines:
+        d.text((60, y), line, font=font, fill="white", stroke_width=6, stroke_fill="black")
+        y += line_h
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    img.convert("RGB").save(out_path, "JPEG", quality=90)
+    return out_path

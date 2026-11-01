@@ -13,7 +13,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from sqlalchemy import select
 
 from .. import db
-from ..models import Video, VideoStatus
+from ..models import Video, VideoFormat, VideoStatus
+from ..publishers import PLATFORM_LABELS
 from ..stats import overview
 from . import pages
 from .auth import validate_init_data
@@ -80,15 +81,18 @@ def create_app(svc: Services) -> FastAPI:
         return {"active": ch.active}
 
     @app.post("/api/channels/{cid}/generate")
-    async def api_generate(cid: int, u: dict = Depends(user)) -> dict:
+    async def api_generate(cid: int, kind: str = VideoFormat.VERTICAL, u: dict = Depends(user)) -> dict:
         missing = svc.missing_prereqs()
         if missing:
             raise HTTPException(400, "Il manque : " + ", ".join(missing))
         ch = await svc.get_channel(cid)
         if ch is None:
             raise HTTPException(404, "Chaîne introuvable")
-        progress = await svc.notifier.progress(f"Génération · {ch.name}", chat_id=int(u["id"]))
-        job = svc.enqueue_generate(cid, progress=progress, label=f"Mini App · {ch.name}")
+        if kind not in (VideoFormat.VERTICAL, VideoFormat.HORIZONTAL):
+            raise HTTPException(400, "Format inconnu")
+        title = f"{'Vidéo longue' if kind == VideoFormat.HORIZONTAL else 'Génération'} · {ch.name}"
+        progress = await svc.notifier.progress(title, chat_id=int(u["id"]))
+        job = svc.enqueue_generate(cid, kind=kind, progress=progress, label=f"Mini App · {title}")
         return {"job": job.id}
 
     @app.post("/api/channels/{cid}/publish-next")
@@ -129,6 +133,16 @@ def create_app(svc: Services) -> FastAPI:
             raise HTTPException(404)
         return FileResponse(v.thumb_path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
+    @app.get("/media/public/{vid}/{exp}/{sig}.mp4")
+    async def media_public(vid: int, exp: int, sig: str) -> FileResponse:
+        """Adresse signée et temporaire : Instagram télécharge la vidéo à publier ici."""
+        if not svc.verify_media(vid, exp, sig):
+            raise HTTPException(403)
+        v = await svc.get_video(vid)
+        if not v or not v.file_path or not Path(v.file_path).exists():
+            raise HTTPException(404)
+        return FileResponse(v.file_path, media_type="video/mp4")
+
     @app.get("/media/video/{vid}")
     async def media_video(vid: int, u: dict = Depends(user)) -> FileResponse:
         v = await svc.get_video(vid)
@@ -152,7 +166,7 @@ def create_app(svc: Services) -> FastAPI:
         return (ch, checked[1]) if ch else None
 
     async def connected(res) -> None:
-        label = "YouTube" if res.platform == "youtube" else "TikTok"
+        label = PLATFORM_LABELS[res.platform]
         await svc.notifier.notify(
             f"<b>{label} connecté</b> · {html.escape(res.channel.name)}\n\nCompte : {html.escape(res.account)}",
             "success", res.channel.id,
@@ -175,31 +189,31 @@ def create_app(svc: Services) -> FastAPI:
         flash = None
         q = request.query_params
         if q.get("done"):
-            name = "YouTube" if q["done"] == "youtube" else "TikTok"
+            name = PLATFORM_LABELS.get(q["done"], q["done"])
             flash = ("success", f"{name} est connecté.")
         elif q.get("off"):
-            name = "YouTube" if q["off"] == "youtube" else "TikTok"
+            name = PLATFORM_LABELS.get(q["off"], q["off"])
             flash = ("info", f"{name} est déconnecté.")
         elif q.get("error"):
             flash = ("error", html.escape(q["error"][:300]))
         return pages.portal(
             ch, token, exp,
-            problems={p: svc.platform_problem(p, ch.id) for p in ("youtube", "tiktok")},
-            automatic={p: svc.oauth_is_automatic(p, ch.id) for p in ("youtube", "tiktok")},
+            problems={p: svc.platform_problem(p, ch.id) for p in PLATFORM_LABELS},
+            automatic={p: svc.oauth_is_automatic(p, ch.id) for p in PLATFORM_LABELS},
             flash=flash, tz=settings.timezone,
         )
 
     @app.get("/connect/{token}/{platform}")
     async def connect_start(token: str, platform: str) -> Response:
         ctx = await portal_context(token)
-        if not ctx or platform not in ("youtube", "tiktok"):
+        if not ctx or platform not in PLATFORM_LABELS:
             return pages.expired(tg_url())
         ch, _ = ctx
         problem = svc.platform_problem(platform, ch.id)
         if problem:
             return RedirectResponse(f"/connect/{token}?error={quote(problem)}", status_code=303)
         try:
-            url = svc.youtube_auth_url(ch.id, portal=token) if platform == "youtube" else svc.tiktok_auth_url(ch.id, portal=token)
+            url = svc.auth_url(platform, ch.id, portal=token)
         except Exception as exc:
             return RedirectResponse(f"/connect/{token}?error={quote(str(exc))}", status_code=303)
         return RedirectResponse(url, status_code=303)
@@ -219,7 +233,7 @@ def create_app(svc: Services) -> FastAPI:
     @app.post("/connect/{token}/{platform}/disconnect")
     async def connect_disconnect(token: str, platform: str) -> Response:
         ctx = await portal_context(token)
-        if not ctx or platform not in ("youtube", "tiktok"):
+        if not ctx or platform not in PLATFORM_LABELS:
             return pages.expired(tg_url())
         await svc.unlink(ctx[0].id, platform)
         return RedirectResponse(f"/connect/{token}?off={platform}", status_code=303)
@@ -227,9 +241,9 @@ def create_app(svc: Services) -> FastAPI:
     @app.get("/oauth/{platform}")
     async def oauth_callback(platform: str, request: Request) -> HTMLResponse:
         q = request.query_params
-        if platform not in ("youtube", "tiktok"):
+        if platform not in PLATFORM_LABELS:
             raise HTTPException(404)
-        name = "YouTube" if platform == "youtube" else "TikTok"
+        name = PLATFORM_LABELS[platform]
         if q.get("error"):
             info = svc.oauth.pop(q.get("state", ""))
             reasons = {"access_denied": "l'accès a été refusé sur la page d'autorisation",

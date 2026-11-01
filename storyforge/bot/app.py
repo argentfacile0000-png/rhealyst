@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,8 @@ from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from telegram.ext import Application
 
+from .. import db
+from ..version import deployed_version
 from .handlers import register
 from .notifier import TelegramNotifier
 from .ui import kb
@@ -60,6 +63,15 @@ async def announce(app: Application, svc: Services) -> None:
     except TelegramError as exc:
         log.warning("set_my_commands: %s", exc)
     svc.bot_username = app.bot.username or ""
+    version = deployed_version()
+    update_note = ""
+    if version and await db.kv_get("announced_version") != version["sha"]:
+        previous = await db.kv_get("announced_version")
+        update_note = (f"\n\n<b>Mise à jour installée</b> · {version['short']}"
+                       + (f"\n<i>{html.escape(version['message'])}</i>" if version["message"] else ""))
+        if previous:
+            await db.log_event(f"Mise à jour installée : {version['short']} {version['message']}".strip(), "success")
+        await db.kv_set("announced_version", version["sha"])
     url = svc.settings.webapp_url
     for admin in svc.settings.admin_ids:
         try:
@@ -68,7 +80,7 @@ async def announce(app: Application, svc: Services) -> None:
                     chat_id=admin, menu_button=MenuButtonWebApp(text="Dashboard", web_app=WebAppInfo(url=url))
                 )
             await app.bot.send_message(
-                admin, "<b>StoryForge</b> est en ligne.", parse_mode=ParseMode.HTML,
+                admin, "<b>StoryForge</b> est en ligne." + update_note, parse_mode=ParseMode.HTML,
                 disable_notification=True, reply_markup=kb([[("Ouvrir le dashboard", "h")]]),
             )
         except TelegramError as exc:

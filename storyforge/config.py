@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     # --- Planning -----------------------------------------------------------
     timezone: str = "Europe/Paris"
     refill_interval_minutes: int = 5
+    auto_update: bool = True  # lu par deploy/update.sh (AUTO_UPDATE=false pour suspendre)
 
     # --- YouTube (OAuth Google) --------------------------------------------
     google_client_secrets_file: Path = Path("secrets/google_client_secret.json")
@@ -84,6 +85,12 @@ class Settings(BaseSettings):
     tiktok_client_key: str = ""
     tiktok_client_secret: str = ""
     tiktok_redirect_uri: str = ""
+
+    # --- Instagram (API avec connexion Instagram) ----------------------------
+    instagram_app_id: str = ""
+    instagram_app_secret: str = ""
+    instagram_redirect_uri: str = ""  # vide = <PUBLIC_URL>/oauth/instagram
+    instagram_api_version: str = "v26.0"
 
     # --- Mini App Telegram / serveur web ------------------------------------
     webapp_enabled: bool = False

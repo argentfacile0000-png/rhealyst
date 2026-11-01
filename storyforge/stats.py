@@ -79,14 +79,14 @@ async def overview(svc: Services, *, recent_limit: int = 8, days: int = 14) -> d
 
     async with db.session() as s:
         channels = list((await s.execute(select(Channel).order_by(Channel.id))).scalars().all())
-        status_counts = {
-            f"{ch_id}:{st}": n
-            for ch_id, st, n in (await s.execute(
-                select(Video.channel_id, Video.status, func.count(Video.id))
-                .where(Video.status.in_([VideoStatus.READY, VideoStatus.PENDING_APPROVAL, VideoStatus.RENDERING]))
-                .group_by(Video.channel_id, Video.status)
-            )).all()
-        }
+        status_counts: dict[str, int] = defaultdict(int)
+        for ch_id, st, fmt, n in (await s.execute(
+            select(Video.channel_id, Video.status, Video.format, func.count(Video.id))
+            .where(Video.status.in_([VideoStatus.READY, VideoStatus.PENDING_APPROVAL, VideoStatus.RENDERING]))
+            .group_by(Video.channel_id, Video.status, Video.format)
+        )).all():
+            status_counts[f"{ch_id}:{st}"] += n
+            status_counts[f"{ch_id}:{st}:{fmt}"] += n
         gen_today = (await s.execute(
             select(func.count(Video.id)).where(Video.created_at >= today0, Video.status != VideoStatus.FAILED)
         )).scalar_one()
@@ -121,7 +121,7 @@ async def overview(svc: Services, *, recent_limit: int = 8, days: int = 14) -> d
     labels = [(datetime.now(zone) - timedelta(days=i)).date() for i in range(days - 1, -1, -1)]
     pub_series = {d: 0 for d in labels}
     gen_series = {d: 0 for d in labels}
-    pub_today = {"youtube": 0, "tiktok": 0}
+    pub_today = {"youtube": 0, "tiktok": 0, "instagram": 0}
     pub_failed_today = 0
     per_channel_today: dict[int, int] = defaultdict(int)
     for platform, status, ch_id, pub_at, created in pub_rows:
@@ -160,6 +160,11 @@ async def overview(svc: Services, *, recent_limit: int = 8, days: int = 14) -> d
             "approval": c.approval_required,
             "youtube": {"enabled": c.youtube_enabled, "linked": c.youtube_linked, "account": c.youtube_account},
             "tiktok": {"enabled": c.tiktok_enabled, "linked": c.tiktok_linked, "account": c.tiktok_account},
+            "instagram": {"enabled": c.instagram_enabled, "linked": c.instagram_linked, "account": c.instagram_account},
+            "shorts_enabled": c.shorts_enabled,
+            "long_enabled": c.long_enabled,
+            "long_ready": status_counts.get(f"{c.id}:{VideoStatus.READY}:horizontal", 0),
+            "long_per_day": len(c.long_schedule_times or []) if c.long_enabled else 0,
             "today": per_channel_today.get(c.id, 0),
         })
 
@@ -172,6 +177,7 @@ async def overview(svc: Services, *, recent_limit: int = 8, days: int = 14) -> d
             "channel_id": v.channel_id,
             "title": v.title,
             "part": f"{v.part_index}/{v.part_count}" if v.part_count > 1 else "",
+            "format": v.format,
             "status": v.status,
             "duration": round(v.duration, 1),
             "created": human_delta(v.created_at, zone),
@@ -198,6 +204,7 @@ async def overview(svc: Services, *, recent_limit: int = 8, days: int = 14) -> d
             "published": sum(pub_today.values()),
             "youtube": pub_today.get("youtube", 0),
             "tiktok": pub_today.get("tiktok", 0),
+            "instagram": pub_today.get("instagram", 0),
             "failed": failed_today + pub_failed_today,
             "openai_tokens": int(tokens[0]) + int(tokens[1]),
             "tts_chars": int(chars_today),

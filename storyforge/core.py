@@ -17,10 +17,10 @@ from sqlalchemy import delete, func, select, update
 from . import db
 from .config import Settings
 from .jobs import Job, JobManager
-from .models import Channel, Publication, PubStatus, Story, Video, VideoStatus, utcnow
+from .models import Channel, Publication, PubStatus, Story, Video, VideoFormat, VideoStatus, utcnow
 from .notify import NullNotifier, Notifier, Progress
 from .pipeline import Pipeline
-from .publishers import PublisherError, tiktok, youtube
+from .publishers import PLATFORM_LABELS, PublisherError, instagram, tiktok, youtube
 from .scheduler import Scheduler
 
 log = logging.getLogger(__name__)
@@ -66,12 +66,13 @@ class Services:
         self.notifier: Notifier = NullNotifier()
         self.pipeline = Pipeline(settings, self.notifier)
         self.pipeline.enqueue_publish = self.enqueue_publish
-        self.jobs = JobManager(settings.max_concurrent_renders, 2)
+        self.pipeline.public_media_url = self.public_media_url
+        self.jobs = JobManager(settings.max_concurrent_renders, 2, busy_file=settings.data_dir / "state" / "busy")
         self.scheduler = Scheduler(self)
         self.oauth = OAuthStates()
         self.started_at = time.time()
         self._quota_cache: tuple[float, dict | None] = (0.0, None)
-        self._failures: dict[int, tuple[int, float]] = {}  # chaîne -> (échecs consécutifs, reprise à)
+        self._failures: dict[str, tuple[int, float]] = {}  # "chaîne:format" -> (échecs consécutifs, reprise à)
         self.bot_username = ""  # renseigné au démarrage du bot (liens « Retour sur Telegram »)
 
     def set_notifier(self, notifier: Notifier) -> None:
@@ -129,26 +130,31 @@ class Services:
         return missing
 
     def enqueue_generate(
-        self, channel_id: int, *, publish_after: bool = False, progress: Progress | None = None, label: str = ""
+        self, channel_id: int, *, kind: str = VideoFormat.VERTICAL, publish_after: bool = False,
+        progress: Progress | None = None, label: str = "",
     ) -> Job:
+        key = f"{channel_id}:{kind}"
+
         async def run() -> None:
             try:
-                await self.pipeline.generate(channel_id, publish_after=publish_after, progress=progress)
-                self._failures.pop(channel_id, None)
+                await self.pipeline.generate(channel_id, kind=kind, publish_after=publish_after, progress=progress)
+                self._failures.pop(key, None)
             except Exception as exc:
-                n = self._failures.get(channel_id, (0, 0.0))[0] + 1
+                n = self._failures.get(key, (0, 0.0))[0] + 1
                 delay = min(300 * 2 ** (n - 1), 7200)
-                self._failures[channel_id] = (n, time.time() + delay)
+                self._failures[key] = (n, time.time() + delay)
                 if progress is None:  # génération automatique : on prévient quand même
                     ch = await self.get_channel(channel_id)
+                    what = "Vidéo longue automatique échouée" if kind == VideoFormat.HORIZONTAL else "Génération automatique échouée"
                     await self.notifier.notify(
-                        f"<b>Génération automatique échouée</b> · {ch.name if ch else channel_id}\n\n{str(exc)[:300]}\n"
+                        f"<b>{what}</b> · {ch.name if ch else channel_id}\n\n{str(exc)[:300]}\n"
                         f"<i>Nouvel essai automatique dans {delay // 60} min.</i>",
                         "error", channel_id,
                     )
                 raise
 
-        return self.jobs.submit("generate", label or "Génération", run, channel_id=channel_id)
+        prefix = "Vidéo longue" if kind == VideoFormat.HORIZONTAL else "Génération"
+        return self.jobs.submit("generate", label or prefix, run, channel_id=channel_id, tag=kind)
 
     def enqueue_publish(self, video_id: int, channel_id: int | None = None) -> Job | None:
         if self.jobs.count(kind="publish", video_id=video_id):
@@ -159,66 +165,71 @@ class Services:
 
         return self.jobs.submit("publish", f"Publication #{video_id}", run, channel_id=channel_id, video_id=video_id)
 
-    async def next_ready_video(self, channel_id: int) -> Video | None:
+    async def next_ready_video(self, channel_id: int, kind: str | None = VideoFormat.VERTICAL) -> Video | None:
+        """Prochaine vidéo prête (dans l'ordre des parties) ; kind=None : tous formats."""
         async with db.session() as s:
+            q = select(Video).where(Video.channel_id == channel_id, Video.status == VideoStatus.READY)
+            if kind:
+                q = q.where(Video.format == kind)
             return (
-                await s.execute(
-                    select(Video)
-                    .where(Video.channel_id == channel_id, Video.status == VideoStatus.READY)
-                    .order_by(Video.story_id, Video.part_index, Video.id)
-                    .limit(1)
-                )
+                await s.execute(q.order_by(Video.story_id, Video.part_index, Video.id).limit(1))
             ).scalar_one_or_none()
 
-    async def publish_slot(self, channel_id: int) -> None:
-        """Créneau de publication : publie la prochaine vidéo prête (ou en génère une)."""
+    async def publish_slot(self, channel_id: int, kind: str = VideoFormat.VERTICAL) -> None:
+        """Créneau de publication : publie la prochaine vidéo prête du format (ou en génère une)."""
         if await self.is_paused():
             return
         async with db.session() as s:
             ch = await s.get(Channel, channel_id)
-        if ch is None or not ch.active:
+        if ch is None or not ch.active or kind not in ch.formats_enabled():
             return
-        video = await self.next_ready_video(channel_id)
+        video = await self.next_ready_video(channel_id, kind)
         if video:
             self.enqueue_publish(video.id, channel_id)
             return
+        label = "vidéo longue" if kind == VideoFormat.HORIZONTAL else "short"
         if not ch.approval_required:
-            if not self.jobs.count(kind="generate", channel_id=channel_id):
-                self.enqueue_generate(channel_id, publish_after=True, label=f"Créneau · {ch.name}")
+            if not self.jobs.count(kind="generate", channel_id=channel_id, tag=kind):
+                self.enqueue_generate(channel_id, kind=kind, publish_after=True, label=f"Créneau {label} · {ch.name}")
             else:
-                await db.log_event(f"{ch.name} : créneau atteint pendant une génération, publication à la fin", "warning", ch.id)
+                await db.log_event(f"{ch.name} : créneau ({label}) atteint pendant une génération, publication à la fin",
+                                   "warning", ch.id)
             return
         await self.notifier.notify(
-            f"<b>Créneau manqué</b> · {ch.name}\n\nAucune vidéo validée pour ce créneau.\n"
+            f"<b>Créneau manqué</b> · {ch.name}\n\nAucune {label} validée pour ce créneau.\n"
             "<i>Valide une vidéo en attente ou lance une génération.</i>",
             "warning", ch.id,
         )
 
-    async def buffer_count(self, channel_id: int) -> int:
+    async def buffer_count(self, channel_id: int, kind: str = VideoFormat.VERTICAL) -> int:
         async with db.session() as s:
             n = (
                 await s.execute(
                     select(func.count(Video.id)).where(
-                        Video.channel_id == channel_id, Video.status.in_(VideoStatus.IN_BUFFER)
+                        Video.channel_id == channel_id, Video.format == kind,
+                        Video.status.in_(VideoStatus.IN_BUFFER),
                     )
                 )
             ).scalar_one()
-        return int(n) + self.jobs.count(kind="generate", channel_id=channel_id)
+        return int(n) + self.jobs.count(kind="generate", channel_id=channel_id, tag=kind)
 
     async def refill(self) -> None:
-        """Maintient `buffer_size` vidéos d'avance pour chaque chaîne active."""
+        """Maintient une réserve de vidéos d'avance, par chaîne active et par format."""
         if await self.is_paused() or self.missing_prereqs():
             return
         async with db.session() as s:
             channels = (await s.execute(select(Channel).where(Channel.active.is_(True)))).scalars().all()
         for ch in channels:
-            # Une génération à la fois par chaîne : une histoire multi-parties remplit plusieurs places.
-            if self.jobs.count(kind="generate", channel_id=ch.id):
-                continue
-            if self._failures.get(ch.id, (0, 0.0))[1] > time.time():  # recul après échec
-                continue
-            if await self.buffer_count(ch.id) < max(1, ch.buffer_size):
-                self.enqueue_generate(ch.id, label=f"Réserve · {ch.name}")
+            for kind in ch.formats_enabled():
+                # Une génération à la fois par chaîne et par format (une série remplit plusieurs places).
+                if self.jobs.count(kind="generate", channel_id=ch.id, tag=kind):
+                    continue
+                if self._failures.get(f"{ch.id}:{kind}", (0, 0.0))[1] > time.time():  # recul après échec
+                    continue
+                target = ch.long_buffer_size if kind == VideoFormat.HORIZONTAL else ch.buffer_size
+                if await self.buffer_count(ch.id, kind) < max(1, target):
+                    label = "Réserve vidéo longue" if kind == VideoFormat.HORIZONTAL else "Réserve"
+                    self.enqueue_generate(ch.id, kind=kind, label=f"{label} · {ch.name}")
 
     async def cleanup_files(self) -> None:
         cutoff = utcnow() - timedelta(days=max(1, self.settings.keep_videos_days))
@@ -367,10 +378,36 @@ class Services:
             return s.tiktok_redirect_uri
         return f"{s.public_base}/oauth/tiktok" if self.portal_available() else ""
 
+    def instagram_redirect_uri(self) -> str:
+        s = self.settings
+        if s.instagram_redirect_uri:
+            return s.instagram_redirect_uri
+        return f"{s.public_base}/oauth/instagram" if self.portal_available() else ""
+
+    def redirect_uri(self, platform: str, channel_id: int) -> str:
+        if platform == "youtube":
+            return self.youtube_redirect_uri(channel_id)
+        if platform == "instagram":
+            return self.instagram_redirect_uri()
+        return self.tiktok_redirect_uri()
+
     def oauth_is_automatic(self, platform: str, channel_id: int) -> bool:
         """Vrai si la plateforme renvoie directement vers notre serveur (sinon : coller l'adresse)."""
-        redirect = self.youtube_redirect_uri(channel_id) if platform == "youtube" else self.tiktok_redirect_uri()
+        redirect = self.redirect_uri(platform, channel_id)
         return self.portal_available() and redirect.startswith(f"{self.settings.public_base}/oauth/")
+
+    # Adresse publique signée d'une vidéo (Instagram télécharge les Reels lui-même)
+    def _media_sig(self, video_id: int, exp: int) -> str:
+        return hmac.new(self._portal_key(), f"media:{video_id}.{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+
+    def public_media_url(self, video_id: int, ttl: int = 6 * 3600) -> str:
+        if not self.portal_available():
+            raise PublisherError("Instagram a besoin d'une adresse publique en https (PUBLIC_URL et WEBAPP_ENABLED)")
+        exp = int(time.time()) + ttl
+        return f"{self.settings.public_base}/media/public/{video_id}/{exp}/{self._media_sig(video_id, exp)}.mp4"
+
+    def verify_media(self, video_id: int, exp: int, sig: str) -> bool:
+        return exp >= time.time() and hmac.compare_digest(sig, self._media_sig(video_id, exp))
 
     def platform_problem(self, platform: str, channel_id: int) -> str | None:
         """Message expliquant ce qui manque pour connecter cette plateforme, ou None."""
@@ -378,6 +415,12 @@ class Services:
         if platform == "youtube":
             if not self.google_client_file(channel_id).exists():
                 return f"Le fichier OAuth Google {s.google_client_secrets_file} est introuvable sur le serveur."
+            return None
+        if platform == "instagram":
+            if not (s.instagram_app_id and s.instagram_app_secret):
+                return "INSTAGRAM_APP_ID et INSTAGRAM_APP_SECRET ne sont pas renseignés dans le .env."
+            if not self.portal_available():
+                return "Instagram télécharge les vidéos sur ton serveur : il faut une adresse publique en https (PUBLIC_URL)."
             return None
         if not (s.tiktok_client_key and s.tiktok_client_secret):
             return "TIKTOK_CLIENT_KEY et TIKTOK_CLIENT_SECRET ne sont pas renseignés dans le .env."
@@ -398,6 +441,18 @@ class Services:
         state = self.oauth.new("tiktok", channel_id, redirect=redirect, portal=portal)
         return tiktok.build_auth_url(self.settings.tiktok_client_key, redirect, state)
 
+    def instagram_auth_url(self, channel_id: int, portal: str = "") -> str:
+        redirect = self.instagram_redirect_uri()
+        state = self.oauth.new("instagram", channel_id, redirect=redirect, portal=portal)
+        return instagram.build_auth_url(self.settings.instagram_app_id, redirect, state)
+
+    def auth_url(self, platform: str, channel_id: int, portal: str = "") -> str:
+        if platform == "youtube":
+            return self.youtube_auth_url(channel_id, portal=portal)
+        if platform == "instagram":
+            return self.instagram_auth_url(channel_id, portal=portal)
+        return self.tiktok_auth_url(channel_id, portal=portal)
+
     async def complete_oauth(self, state: str, code: str) -> OAuthResult:
         info = self.oauth.pop(state)
         if not info:
@@ -413,6 +468,18 @@ class Services:
                 log.warning("Titre de chaîne YouTube indisponible: %s", exc)
                 account = "compte Google"
             ch = await self.update_channel(channel_id, youtube_credentials=creds, youtube_account=account)
+        elif platform == "instagram":
+            version = s.instagram_api_version
+            creds = await instagram.exchange_code(s.instagram_app_id, s.instagram_app_secret, info["redirect"], code,
+                                                  version=version)
+            try:
+                me = await instagram.user_info(creds["access_token"], version=version)
+                account = f"@{me['username']}" if me.get("username") else "compte Instagram"
+                creds["user_id"] = str(me.get("user_id") or creds.get("user_id", ""))
+            except Exception as exc:
+                log.warning("Infos Instagram indisponibles: %s", exc)
+                account = "compte Instagram"
+            ch = await self.update_channel(channel_id, instagram_credentials=creds, instagram_account=account)
         else:
             creds = await tiktok.exchange_code(s.tiktok_client_key, s.tiktok_client_secret, info["redirect"], code)
             try:
@@ -422,8 +489,7 @@ class Services:
                 log.warning("Infos TikTok indisponibles: %s", exc)
                 account = "compte TikTok"
             ch = await self.update_channel(channel_id, tiktok_credentials=creds, tiktok_account=account)
-        label = "YouTube" if platform == "youtube" else "TikTok"
-        await db.log_event(f"{ch.name} : {label} connecté ({account})", "success", channel_id)
+        await db.log_event(f"{ch.name} : {PLATFORM_LABELS[platform]} connecté ({account})", "success", channel_id)
         return OAuthResult(platform, ch, account, info.get("portal", ""))
 
     async def complete_oauth_from_url(self, pasted: str) -> OAuthResult:
@@ -439,10 +505,10 @@ class Services:
         return await self.complete_oauth(state, code)
 
     async def unlink(self, channel_id: int, platform: str) -> Channel:
-        fields = ({"youtube_credentials": None, "youtube_account": ""} if platform == "youtube"
-                  else {"tiktok_credentials": None, "tiktok_account": ""})
-        ch = await self.update_channel(channel_id, **fields)
-        await db.log_event(f"{ch.name} : {'YouTube' if platform == 'youtube' else 'TikTok'} déconnecté", "info", channel_id)
+        if platform not in PLATFORM_LABELS:
+            raise ValueError(platform)
+        ch = await self.update_channel(channel_id, **{f"{platform}_credentials": None, f"{platform}_account": ""})
+        await db.log_event(f"{ch.name} : {PLATFORM_LABELS[platform]} déconnecté", "info", channel_id)
         return ch
 
     # ------------------------------------------------------------------ quotas

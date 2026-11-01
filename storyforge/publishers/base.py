@@ -22,6 +22,9 @@ class PublishRequest:
     language: str
     privacy: str
     mode: str = "direct"
+    kind: str = "vertical"  # vertical | horizontal
+    thumbnail_path: str | None = None  # miniature personnalisée (YouTube, vidéo longue)
+    video_url: str = ""  # adresse publique de la vidéo (Instagram la télécharge lui-même)
 
 
 @dataclass

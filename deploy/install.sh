@@ -15,6 +15,8 @@ BRANCH="${STORYFORGE_BRANCH:-claude/telegram-dashboard-video-automation-92ebn6}"
 APP="${STORYFORGE_DIR:-$HOME/storyforge}"
 SERVICE="storyforge"
 UNIT="/etc/systemd/system/${SERVICE}.service"
+UPDATE_UNIT="/etc/systemd/system/${SERVICE}-update.service"
+UPDATE_TIMER="/etc/systemd/system/${SERVICE}-update.timer"
 MARKER="# Managed by StoryForge install.sh"
 WITH_HTTPS=0
 for arg in "$@"; do
@@ -68,15 +70,17 @@ if [ -r /etc/os-release ]; then . /etc/os-release; ok "Système : ${PRETTY_NAME:
 if [ -d "$APP" ] && [ -n "$(ls -A "$APP" 2>/dev/null)" ] && [ ! -f "$APP/.storyforge" ]; then
   die "$APP existe déjà et n'appartient pas à StoryForge. Choisis un autre dossier : STORYFORGE_DIR=~/autre bash install.sh"
 fi
-if [ -f "$UNIT" ] && ! grep -q "$MARKER" "$UNIT"; then
-  die "Un service $SERVICE existe déjà et n'a pas été créé par StoryForge : rien n'est modifié."
-fi
+for unit_file in "$UNIT" "$UPDATE_UNIT" "$UPDATE_TIMER"; do
+  if [ -f "$unit_file" ] && ! grep -q "$MARKER" "$unit_file"; then
+    die "$unit_file existe déjà et n'a pas été créé par StoryForge : rien n'est modifié."
+  fi
+done
 mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 free_gb=$(df -Pk "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
 ok "Mémoire : ${mem_mb} Mo · disque libre : ${free_gb} Go"
 [ "$free_gb" -ge 3 ] || warn "Moins de 3 Go libres : prévois de la place pour les vidéos de fond."
 
-mkdir -p "$APP/data/backgrounds" "$APP/data/music" "$APP/secrets"
+mkdir -p "$APP/data/backgrounds" "$APP/data/music" "$APP/data/state" "$APP/secrets" "$APP/bin"
 touch "$APP/.storyforge"
 chmod 700 "$APP/secrets"
 
@@ -108,13 +112,17 @@ ok "$(uv --version)"
 
 # ---------------------------------------------------------------- 3. code
 step "Code de StoryForge ($BRANCH)"
-tmp="$(mktemp -d)"
-curl -fsSL "https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}" | tar xz -C "$tmp" --strip-components=1
+sha="$(curl -fsS -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/${REPO}/commits/${BRANCH}" || true)"
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "Impossible de lire la dernière version sur GitHub."
+tmp="$(mktemp -d /tmp/storyforge-install.XXXXXX)"
+curl -fsSL "https://codeload.github.com/${REPO}/tar.gz/${sha}" | tar xz -C "$tmp" --strip-components=1
 [ -f "$tmp/storyforge/__main__.py" ] || die "Archive inattendue : téléchargement incomplet ?"
-rm -rf "$APP/src.previous"
+echo "$sha" >"$tmp/.version"
+printf '{"sha": "%s", "message": "", "date": "%s"}\n' "$sha" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$tmp/.version.json"
+rm -rf -- "${APP:?}/src.previous"
 [ -d "$APP/src" ] && mv "$APP/src" "$APP/src.previous"
 mv "$tmp" "$APP/src"
-ok "Installé dans $APP/src"
+ok "Version ${sha:0:7} installée dans $APP/src"
 
 # ---------------------------------------------------------------- 4. dépendances
 step "Dépendances Python"
@@ -216,8 +224,41 @@ Nice=5
 [Install]
 WantedBy=multi-user.target
 EOF
+# Mise à jour automatique : vérifie GitHub toutes les 5 minutes
+install -m 755 "$APP/src/deploy/update.sh" "$APP/bin/update.sh"
+sudo tee "$UPDATE_UNIT" >/dev/null <<EOF
+$MARKER
+[Unit]
+Description=StoryForge : mise à jour automatique depuis GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=STORYFORGE_DIR=$APP
+Environment=STORYFORGE_USER=$(id -un)
+Environment=STORYFORGE_BRANCH=$BRANCH
+Environment=STORYFORGE_REPO=$REPO
+ExecStart=/bin/bash $APP/bin/update.sh
+EOF
+sudo tee "$UPDATE_TIMER" >/dev/null <<EOF
+$MARKER
+[Unit]
+Description=StoryForge : vérification des mises à jour toutes les 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 sudo systemctl daemon-reload
 sudo systemctl enable -q "$SERVICE"
+sudo systemctl enable -q --now "${SERVICE}-update.timer"
 sudo systemctl restart "$SERVICE"
 sleep 6
 if systemctl is-active --quiet "$SERVICE"; then
@@ -236,5 +277,6 @@ Terminé.
   Vidéos de fond : $APP/data/backgrounds/<catégorie>/ (ou depuis le bot, Banque vidéo).
   Journaux      : sudo journalctl -u $SERVICE -f
   Configuration : nano $APP/.env, puis sudo systemctl restart $SERVICE
-  Mise à jour   : relance ce script.
+  Mises à jour  : automatiques à chaque push sur GitHub (vérification toutes les 5 min).
+                  Forcer : sudo systemctl start ${SERVICE}-update · Journal : sudo journalctl -u ${SERVICE}-update
 EOF

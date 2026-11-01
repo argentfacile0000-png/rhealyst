@@ -139,7 +139,9 @@ class TelegramNotifier:
                     msg = await self.bot.send_video(
                         chat_id, video=fh, caption=caption[:1024], parse_mode=ParseMode.HTML,
                         reply_markup=markup, supports_streaming=True, duration=int(v.duration),
-                        width=1080, height=1920, read_timeout=180, write_timeout=180,
+                        width=1920 if v.format == "horizontal" else 1080,
+                        height=1080 if v.format == "horizontal" else 1920,
+                        read_timeout=180, write_timeout=180,
                     )
             else:
                 msg = await self.bot.send_message(chat_id, caption, parse_mode=ParseMode.HTML, reply_markup=markup)

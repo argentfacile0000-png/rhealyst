@@ -75,8 +75,19 @@ def build_user_prompt(
     seconds_per_part: int,
     avoid_titles: list[str],
     custom_instructions: str = "",
+    long_form: bool = False,
 ) -> str:
-    if parts <= 1:
+    if long_form:
+        minutes = max(1, round(seconds_per_part / 60))
+        length = (
+            f"This is a LONG-FORM YouTube video: one single story of about {words_per_part} words "
+            f"(between {int(words_per_part * 0.9)} and {int(words_per_part * 1.1)} words, about {minutes} minutes "
+            "of narration). Same hook rules and voice. Build it in 4 to 6 escalating acts, each ending on a micro "
+            "cliffhanger that makes the viewer stay; give the side characters more depth and more dialogue; add one "
+            "mid-story twist that recontextualizes everything, then a final payoff and a short, satisfying aftermath. "
+            "No chapter titles, no headings, no 'Part' mentions: continuous narration only."
+        )
+    elif parts <= 1:
         length = (
             f"One single part of about {words_per_part} words (between {int(words_per_part * 0.9)} and "
             f"{int(words_per_part * 1.1)} words), which is about {seconds_per_part} seconds of narration. "

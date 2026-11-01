@@ -15,16 +15,16 @@ from sqlalchemy import select
 
 from . import db
 from .config import Settings
-from .models import Channel, Publication, PubStatus, Story, Video, VideoStatus, utcnow
+from .models import Channel, Publication, PubStatus, Story, Video, VideoFormat, VideoStatus, utcnow
 from .notify import Notifier, Progress
-from .publishers import PublisherError, PublishRequest, tiktok, youtube
+from .publishers import PLATFORM_LABELS, PublisherError, PublishRequest, instagram, tiktok, youtube
 from .story import StoryGenerator
 from .story.styles import FORMATS, get_language
 from .tts import ElevenLabsClient, VoiceSettings
 from .video.background import BackgroundBank
 from .video.captions import CaptionStyle, build_ass, hook_end_time
-from .video.card import render_hook_card
-from .video.renderer import RenderJob, make_telegram_preview, make_thumbnail, render
+from .video.card import render_cover, render_hook_card
+from .video.renderer import RenderJob, grab_frame, make_telegram_preview, make_thumbnail, render
 
 log = logging.getLogger(__name__)
 
@@ -64,11 +64,15 @@ class Pipeline:
         self.stories = StoryGenerator(settings)
         self.tts = ElevenLabsClient(settings.elevenlabs_api_key, settings.elevenlabs_model, ffmpeg=settings.ffmpeg_bin)
         self.bank = BackgroundBank(settings.backgrounds_dir, ffprobe=settings.ffprobe_bin)
-        # Branché par Services : met une publication en file d'attente.
+        # Branchés par Services : file de publication et adresse publique signée d'une vidéo.
         self.enqueue_publish: Callable[[int], object] | None = None
+        self.public_media_url: Callable[[int], str] | None = None
 
     # ------------------------------------------------------------------ génération
-    async def generate(self, channel_id: int, *, publish_after: bool = False, progress: Progress | None = None) -> list[int]:
+    async def generate(
+        self, channel_id: int, *, kind: str = VideoFormat.VERTICAL, publish_after: bool = False,
+        progress: Progress | None = None,
+    ) -> list[int]:
         async with db.session() as s:
             ch = await s.get(Channel, channel_id)
             if ch is None:
@@ -78,18 +82,25 @@ class Pipeline:
                     select(Story.title).where(Story.channel_id == channel_id).order_by(Story.id.desc()).limit(30)
                 )
             ).scalars().all()
-        progress = progress or await self.notifier.progress(f"Génération · {ch.name}")
+        long_form = kind == VideoFormat.HORIZONTAL
+        progress = progress or await self.notifier.progress(
+            f"{'Vidéo longue' if long_form else 'Génération'} · {ch.name}")
         rng = random.Random()
         video_ids: list[int] = []
 
         try:
             await progress.update("story", "run")
-            seconds = rng.uniform(min(ch.min_seconds, ch.max_seconds), max(ch.min_seconds, ch.max_seconds))
+            if long_form:
+                lo, hi = sorted((ch.long_min_minutes * 60, ch.long_max_minutes * 60))
+            else:
+                lo, hi = sorted((ch.min_seconds, ch.max_seconds))
+            seconds = rng.uniform(lo, hi)
             gs = await self.stories.generate(
                 language=ch.language,
                 formats=ch.formats,
                 narrator_gender=ch.narrator_gender,
-                parts=ch.parts,
+                parts=1 if long_form else ch.parts,
+                long_form=long_form,
                 seconds_per_part=int(seconds),
                 voice_speed=ch.voice_speed,
                 speedup=ch.speedup,
@@ -114,7 +125,8 @@ class Pipeline:
             )
 
             for i, text in enumerate(gs.parts, start=1):
-                vid = await self._render_part(ch, story_id, gs.title, gs.hook, i, len(gs.parts), text, progress, rng)
+                vid = await self._render_part(ch, story_id, gs.title, gs.hook, i, len(gs.parts), text, progress, rng,
+                                              kind=kind)
                 video_ids.append(vid)
         except Exception as exc:
             # Une série incomplète ne doit pas être publiée : les parties déjà montées passent en échec.
@@ -138,7 +150,7 @@ class Pipeline:
                     v.publish_after = publish_after and vid == video_ids[0] and not ch.approval_required
         n = len(video_ids)
         await progress.finish(
-            f"{n} vidéo{'s' if n > 1 else ''} prête{'s' if n > 1 else ''}"
+            ("Vidéo longue prête" if long_form else f"{n} vidéo{'s' if n > 1 else ''} prête{'s' if n > 1 else ''}")
             + (" · en attente de validation" if ch.approval_required else "")
         )
         await db.log_event(f"{ch.name} : « {gs.title[:80]} » générée ({n} partie{'s' if n > 1 else ''})", "success", ch.id)
@@ -164,13 +176,17 @@ class Pipeline:
 
     async def _render_part(
         self, ch: Channel, story_id: int, title: str, hook: str, index: int, count: int, text: str,
-        progress: Progress, rng: random.Random,
+        progress: Progress, rng: random.Random, *, kind: str = VideoFormat.VERTICAL,
     ) -> int:
         lang = get_language(ch.language)
+        horizontal = kind == VideoFormat.HORIZONTAL
+        W, H = self.settings.video_width, self.settings.video_height
+        if horizontal:
+            W, H = max(W, H), min(W, H)
         part_txt = f" · partie {index}/{count}" if count > 1 else ""
         async with db.session() as s:
             video = Video(
-                channel_id=ch.id, story_id=story_id, part_index=index, part_count=count,
+                channel_id=ch.id, story_id=story_id, part_index=index, part_count=count, format=kind,
                 status=VideoStatus.RENDERING, title=title, text=text,
             )
             s.add(video)
@@ -210,23 +226,26 @@ class Pipeline:
             card_png, card_until = None, 0.0
             if ch.hook_card and index == 1 and hook:
                 card_png = render_hook_card(hook, ch.name, workdir / "card.png", self.settings.fonts_dir,
-                                            width=self.settings.video_width)
+                                            width=min(W, H))
                 card_until = hook_end_time(tts.words, hook)
-            label = f"{lang.part_word} {index}" if (ch.show_part_label and count > 1) else None
+            label = f"{lang.part_word} {index}" if (ch.show_part_label and count > 1 and not horizontal) else None
+            base_size = 92 if ch.caption_style == "trio" else 112
             style = CaptionStyle(
                 mode=ch.caption_style, color=ch.caption_color, highlight=ch.highlight_color,
                 position=ch.caption_position,
+                size=int(base_size * min(W, H) / 1080 * (0.85 if horizontal else 1.0)),
             )
             ass = workdir / "subs.ass"
             ass.write_text(
-                build_ass(tts.words, width=self.settings.video_width, height=self.settings.video_height,
+                build_ass(tts.words, width=W, height=H,
                           style=style, label=label, duration=duration, captions_from=card_until),
                 "utf-8",
             )
 
             # 4) Montage
             out_dir = self.settings.output_dir / f"{ch.id}-{slugify(ch.name, 24)}"
-            out = out_dir / f"{video_id:05d}-{slugify(title)}{f'-p{index}' if count > 1 else ''}.mp4"
+            suffix = "-long" if horizontal else (f"-p{index}" if count > 1 else "")
+            out = out_dir / f"{video_id:05d}-{slugify(title)}{suffix}.mp4"
             throttle = Throttle()
 
             async def on_progress(frac: float) -> None:
@@ -239,17 +258,26 @@ class Pipeline:
                 RenderJob(
                     segment=seg, narration=tts.audio_path, ass_file=ass, output=out, duration=duration,
                     card_png=card_png, card_until=card_until, music=music,
-                    music_volume=ch.music_volume, bg_volume=ch.bg_volume,
+                    music_volume=ch.music_volume, bg_volume=ch.bg_volume, width=W, height=H,
                 ),
                 self.settings,
                 on_progress=on_progress,
             )
-            await progress.update("render", "done", detail=f"1080×1920 · {fmt_ts(duration)}{part_txt}")
+            await progress.update("render", "done", detail=f"{W}×{H} · {fmt_ts(duration)}{part_txt}")
 
-            # 5) Miniature + aperçu Telegram
+            # 5) Miniatures + aperçu Telegram
             await progress.update("finish", "run")
             thumb = await make_thumbnail(out, out.with_suffix(".jpg"), self.settings, at=min(2.0, duration / 3))
-            preview = await make_telegram_preview(out, out.with_name(out.stem + "_preview.mp4"), self.settings)
+            cover = None
+            if horizontal:
+                # Image prise dans le fond brut (sans sous-titres) pour la miniature
+                at = seg.start + min(30.0, duration / 4)
+                if seg.source_duration:
+                    at = min(at, max(0.0, seg.source_duration - 0.5))
+                frame = await grab_frame(seg.path, workdir / "frame.jpg", self.settings, at=at)
+                cover = render_cover(frame, title, out.with_name(out.stem + "_cover.jpg"), self.settings.fonts_dir)
+            preview = await make_telegram_preview(out, out.with_name(out.stem + "_preview.mp4"), self.settings,
+                                                  duration=duration)
             await progress.update("finish", "done")
 
             async with db.session() as s:
@@ -257,6 +285,7 @@ class Pipeline:
                 v.file_path = str(out)
                 v.thumb_path = str(thumb)
                 v.preview_path = str(preview)
+                v.cover_path = str(cover) if cover else None
                 v.duration = duration
                 v.file_size = out.stat().st_size
                 v.bg_file = str(seg.path)
@@ -285,7 +314,7 @@ class Pipeline:
                 video.error = "Fichier vidéo introuvable"
                 await db.log_event(f"Publication impossible (#{video_id}) : fichier manquant", "error", video.channel_id)
                 return
-            platforms = ch.platforms()
+            platforms = ch.platforms(video.format)
             if not platforms:
                 await self.notifier.notify(
                     f"<b>Publication en attente</b> · {ch.name}\n\nAucune plateforme liée ou activée. "
@@ -333,13 +362,22 @@ class Pipeline:
                 video_path=video.file_path, title=yt_title, description=description, tags=story.hashtags,
                 caption=caption, language=story.language,
                 privacy=ch.youtube_privacy if platform == "youtube" else ch.tiktok_privacy,
-                mode=ch.tiktok_mode,
+                mode=ch.tiktok_mode, kind=video.format,
+                thumbnail_path=video.cover_path if video.cover_path and Path(video.cover_path).exists() else None,
             )
             try:
                 if platform == "youtube":
                     result = await youtube.upload(ch.youtube_credentials or {}, req)
                     if result.credentials:
                         await self._save_creds(ch.id, "youtube_credentials", result.credentials)
+                elif platform == "instagram":
+                    creds, changed = await instagram.refresh_if_needed(ch.instagram_credentials or {})
+                    if changed:
+                        await self._save_creds(ch.id, "instagram_credentials", creds)
+                    if not self.public_media_url:
+                        raise PublisherError("Instagram a besoin de PUBLIC_URL (https) pour récupérer la vidéo")
+                    req.video_url = self.public_media_url(video_id)
+                    result = await instagram.publish(creds, req, version=self.settings.instagram_api_version)
                 else:
                     creds, changed = await tiktok.refresh_if_needed(
                         self.settings.tiktok_client_key, self.settings.tiktok_client_secret, ch.tiktok_credentials or {}
@@ -361,7 +399,7 @@ class Pipeline:
                     pub = await s.get(Publication, pub_id)
                     pub.status = PubStatus.FAILED
                     pub.error = msg[:1000]
-                label = "YouTube" if platform == "youtube" else "TikTok"
+                label = PLATFORM_LABELS.get(platform, platform)
                 detail = msg if label.lower() in msg.lower() else f"{label} : {msg}"
                 await db.log_event(f"{ch.name} · {detail}", "error", ch.id)
 

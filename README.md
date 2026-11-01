@@ -2,8 +2,8 @@
 
 **Usine à vidéos « storytime » automatisées, pilotée depuis un dashboard Telegram.**
 Histoires originales écrites par une IA (Gemini ou Groq gratuits, ou OpenAI) → voix off ElevenLabs → séquence de fond tirée au hasard
-→ sous-titres mot à mot → publication automatique sur **YouTube Shorts** et **TikTok**,
-avec **plusieurs instances** (chaînes) qui publient chacune sur leurs propres comptes.
+→ sous-titres mot à mot → publication automatique sur **YouTube** (Shorts et vidéos longues), **TikTok**
+et **Instagram Reels**, avec **plusieurs instances** (chaînes) qui publient chacune sur leurs propres comptes.
 
 ```
  ⏰ Créneau / ⚡ bouton
@@ -18,10 +18,10 @@ avec **plusieurs instances** (chaînes) qui publient chacune sur leurs propres c
  🎞 Banque vidéo ──► vidéo de fond au hasard ──► séquence au hasard de la durée exacte
         │
         ▼
- 🎬 ffmpeg ──► 1080×1920 · sous-titres « pop » mot à mot · label PARTIE N · carte d'accroche
+ 🎬 ffmpeg ──► Short 1080×1920 ou vidéo longue 1920×1080 · sous-titres mot à mot · carte d'accroche
         │
         ▼
- ✋ Validation dans Telegram (optionnelle) ──► 🚀 YouTube Shorts + TikTok ──► 🔔 liens dans Telegram
+ ✋ Validation dans Telegram (optionnelle) ──► 🚀 YouTube · TikTok · Instagram ──► 🔔 liens dans Telegram
 ```
 
 ---
@@ -53,6 +53,22 @@ depuis Telegram (thème, ton, interdits…).
 4. La vidéo est recadrée en 9:16 (les fonds 16:9 type gameplay fonctionnent aussi). Si un fond est trop court, il est bouclé.
 
 ---
+
+## Formats : Shorts et vidéos longues
+
+Chaque chaîne peut produire deux formats, avec chacun sa réserve et ses créneaux (Réglages → Formats) :
+
+| | Short | Vidéo longue |
+|---|---|---|
+| Image | verticale 1080×1920 | horizontale 1920×1080 |
+| Durée | 30 s à 3 min, en une ou plusieurs parties | 5 à 30 min, une histoire en plusieurs actes |
+| Publication | YouTube Shorts, TikTok, Instagram Reels | YouTube uniquement |
+| Extras | label « Partie N » | miniature YouTube générée avec le titre |
+
+Une minute de narration consomme environ 1 000 à 1 500 caractères ElevenLabs : avec le forfait Starter
+(40 000 caractères par mois), compte une trentaine de minutes de vidéos longues par mois, Shorts compris.
+La miniature personnalisée n'est acceptée par YouTube que si la chaîne est validée par téléphone ; sinon la
+vidéo est publiée avec une image automatique.
 
 ## Le dashboard Telegram
 
@@ -126,7 +142,13 @@ ffmpeg, un Python 3.12 isolé et le service `storyforge` (redémarrage automatiq
 le code en gardant la configuration, les vidéos et la base.
 
 - `bash install.sh --https` ajoute une adresse HTTPS gratuite (`<ip>.sslip.io`, via Caddy) pour la page de connexion
-  des comptes et la Mini App. Il faut ensuite ouvrir le port 443 dans le pare-feu Lightsail.
+  des comptes, la Mini App et Instagram. Il faut ensuite ouvrir le port 443 dans le pare-feu Lightsail.
+
+**Mises à jour automatiques.** Le serveur vérifie GitHub toutes les 5 minutes. À chaque nouveau commit sur la branche,
+il télécharge le code, installe les dépendances et redémarre le bot, sans jamais couper un rendu ou une publication
+en cours (il attend la fin). Si la nouvelle version ne démarre pas, il revient seul à la précédente. Le bot annonce
+chaque mise à jour dans Telegram, et on peut les suspendre depuis Réglages (ou `AUTO_UPDATE=false` dans le `.env`).
+Forcer une vérification : `sudo systemctl start storyforge-update` ; journal : `sudo journalctl -u storyforge-update`.
 - Journaux : `sudo journalctl -u storyforge -f`. Configuration : `~/storyforge/.env`.
 
 ### En local
@@ -209,6 +231,20 @@ Les vidéos sont déclarées comme contenant des médias synthétiques (`contain
 > la vidéo arrive dans ta boîte de réception TikTok et tu la publies en un tap (pratique aussi pour ajouter un son tendance).
 > Les vidéos sont marquées « contenu généré par IA » (`is_aigc`).
 
+### Instagram (Reels)
+
+1. Passe le compte Instagram en **compte professionnel** (créateur ou entreprise), dans l'appli Instagram.
+2. [developers.facebook.com](https://developers.facebook.com/) : crée une app, ajoute le produit **Instagram**
+   et choisis la configuration **avec connexion Instagram** (permissions `instagram_business_basic` et
+   `instagram_business_content_publish`). Ajoute ton compte Instagram comme testeur tant que l'app n'est pas validée.
+3. Ajoute l'URI de redirection `https://studio.mondomaine.com/oauth/instagram`, puis renseigne
+   `INSTAGRAM_APP_ID` et `INSTAGRAM_APP_SECRET` dans le `.env`.
+4. Connecte le compte depuis la page Comptes de la chaîne.
+
+> Avec la connexion Instagram, l'API ne reçoit pas le fichier : Instagram télécharge chaque vidéo sur ton serveur,
+> via une adresse signée valable 6 heures. Il faut donc `PUBLIC_URL` en https (`bash install.sh --https`).
+> Seuls les Shorts (verticaux) sont publiés en Reels. L'accès est valable 60 jours et prolongé automatiquement.
+
 ### Mini App (dashboard visuel)
 
 Avec la même configuration (`WEBAPP_ENABLED` et `PUBLIC_URL`), le bouton **Dashboard** apparaît dans le menu du bot.
@@ -221,7 +257,8 @@ Les requêtes sont authentifiées par la signature Telegram (`initData`) et rés
 1. **🎞 Banque vidéos** : dépose des vidéos dans `data/backgrounds/<catégorie>/` (cooking, minecraft, satisfying…).
    Privilégie des vidéos longues (20-60 min) et **dont tu as les droits**. Musique optionnelle dans `data/music/`.
 2. **➕ Nouvelle chaîne** : nom → langue → formats, voix, durée, parties…
-3. **Comptes** : connecte YouTube et/ou TikTok (chaque chaîne a ses propres comptes : c'est ce qui permet le multi-instances).
+3. **Comptes** : connecte YouTube, TikTok et/ou Instagram (chaque chaîne a ses propres comptes : c'est ce qui permet le multi-instances).
+   Dans Réglages → Formats, active les vidéos longues YouTube si tu en veux.
 4. **▶️ Activer** : la chaîne fabrique sa **réserve** de vidéos d'avance, puis publie à chaque **créneau**
    (avec une variation aléatoire de quelques minutes pour un rythme naturel).
 5. Avec **validation manuelle** ON, rien ne part sans ton ✅ ; OFF, tout est 100 % automatique.
@@ -245,9 +282,12 @@ storyforge/
 ├── story/               # prompts, formats, ADN aléatoire, client IA (Gemini, Groq, OpenAI)
 ├── tts/                 # ElevenLabs (avec horodatage) + resserrage des silences
 ├── video/               # banque de fonds, sous-titres ASS, carte d'accroche, rendu ffmpeg
-├── publishers/          # YouTube Data API v3 · TikTok Content Posting API
+├── publishers/          # YouTube Data API v3 · TikTok Content Posting API · Instagram (Reels)
 ├── bot/                 # dashboard Telegram (écrans, réglages, notifications)
-└── webapp/              # Mini App (FastAPI + page unique) et retours OAuth
+└── webapp/              # Mini App, page de connexion des comptes, retours OAuth, vidéos pour Instagram
+deploy/
+├── install.sh           # installation sur un serveur Ubuntu (service systemd)
+└── update.sh            # mise à jour automatique depuis GitHub (timer systemd)
 ```
 
 ### Tests

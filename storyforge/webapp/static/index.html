@@ -409,7 +409,7 @@ function render(d) {
 
   $("kGen").textContent = d.today.generated;
   $("kPub").textContent = d.today.published;
-  $("kPubSub").textContent = `YouTube ${d.today.youtube} · TikTok ${d.today.tiktok}`;
+  $("kPubSub").textContent = `YT ${d.today.youtube} · TT ${d.today.tiktok} · IG ${d.today.instagram || 0}`;
   $("kAppr").textContent = d.pending_approval;
   $("kApprSub").textContent = d.pending_approval ? "en attente de toi" : "rien en attente";
   $("kFail").textContent = d.today.failed;
@@ -453,6 +453,7 @@ function render(d) {
   $("chCount").textContent = `${active} active${active > 1 ? "s" : ""} sur ${d.channels.length}`;
   $("channels").innerHTML = d.channels.length ? d.channels.map((c) => {
     const meta = [`${c.ready} prête${c.ready > 1 ? "s" : ""}`];
+    if (c.long_enabled) meta.push(`${c.long_ready} longue${c.long_ready > 1 ? "s" : ""} prête${c.long_ready > 1 ? "s" : ""}`);
     if (c.pending) meta.push(`${c.pending} à valider`);
     if (c.rendering) meta.push(`${c.rendering} en fabrication`);
     meta.push(c.active ? `prochain créneau ${c.next_slot}` : "en pause");
@@ -469,7 +470,7 @@ function render(d) {
             <span class="text-xs px-2 py-0.5 rounded bg-muted text-muted uppercase tracking-wide">${esc(c.language)}</span>
           </div>
           <p class="text-sm text-muted mt-1">${esc(meta.join(" · "))}</p>
-          <div class="flex gap-4 mt-2">${plat("YouTube", c.youtube)}${plat("TikTok", c.tiktok)}</div>
+          <div class="flex flex-wrap gap-x-4 gap-y-1 mt-2">${plat("YouTube", c.youtube)}${plat("TikTok", c.tiktok)}${plat("Instagram", c.instagram)}</div>
         </div>
         <label class="switch mt-0.5" title="${c.active ? "Mettre en pause" : "Activer"}">
           <input type="checkbox" ${c.active ? "checked" : ""} data-toggle="${c.id}" aria-label="${c.active ? "Mettre en pause" : "Activer"} ${esc(c.name)}">
@@ -477,7 +478,8 @@ function render(d) {
         </label>
       </div>
       <div class="flex flex-wrap gap-2 mt-4">
-        <button type="button" class="${BTN_SECONDARY}" data-act="/api/channels/${c.id}/generate" data-msg="Génération lancée — suivi dans Telegram">${icon("zap")}Générer</button>
+        <button type="button" class="${BTN_SECONDARY}" data-act="/api/channels/${c.id}/generate" data-msg="Génération lancée — suivi dans Telegram">${icon("zap")}${c.long_enabled ? "Short" : "Générer"}</button>
+        ${c.long_enabled ? `<button type="button" class="${BTN_SECONDARY}" data-act="/api/channels/${c.id}/generate?kind=horizontal" data-msg="Vidéo longue lancée — suivi dans Telegram">${icon("zap")}Vidéo longue</button>` : ""}
         <button type="button" class="${BTN_SECONDARY}" data-act="/api/channels/${c.id}/publish-next" data-msg="Publication lancée">${icon("send")}Publier</button>
         <button type="button" class="${BTN_SECONDARY}" data-connect="${c.id}">${icon("link")}Comptes</button>
       </div>
@@ -499,7 +501,7 @@ function render(d) {
   // Dernières vidéos
   $("recent").innerHTML = d.recent.length ? d.recent.map((v) => {
     const links = v.pubs.map((p) => {
-      const name = p.platform === "youtube" ? "YouTube" : "TikTok";
+      const name = { youtube: "YouTube", tiktok: "TikTok", instagram: "Instagram" }[p.platform] || p.platform;
       if (p.url) return `<a href="${esc(p.url)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-xs text-muted hover:text-[hsl(var(--foreground))] transition-colors">${name}${icon("external", "w-3 h-3")}</a>`;
       if (p.status === "failed") return `<span class="text-xs text-red-600 dark:text-red-400" title="${esc(p.error)}">${name} : échec</span>`;
       if (p.status === "draft") return `<span class="text-xs text-muted">${name} : brouillon</span>`;
@@ -512,7 +514,7 @@ function render(d) {
       </button>
       <div class="min-w-0 flex-1">
         <p class="text-sm font-medium truncate">${esc(v.title)}</p>
-        <p class="text-xs text-muted truncate mt-0.5">${esc(v.channel)}${v.part ? " · partie " + esc(v.part) : ""} · ${esc(v.created)}</p>
+        <p class="text-xs text-muted truncate mt-0.5">${esc(v.channel)}${v.format === "horizontal" ? " · vidéo longue" : ""}${v.part ? " · partie " + esc(v.part) : ""} · ${esc(v.created)}</p>
         ${links ? `<div class="flex items-center gap-2 mt-1">${links}</div>` : ""}
       </div>
       <div class="shrink-0">${statusBadge(v.status)}</div>

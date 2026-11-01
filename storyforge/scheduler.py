@@ -12,7 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
 from . import db
-from .models import Channel
+from .models import Channel, VideoFormat
 
 if TYPE_CHECKING:
     from .core import Services
@@ -65,29 +65,34 @@ class Scheduler:
             self.sched.shutdown(wait=False)
 
     def sync_channel(self, ch: Channel) -> None:
+        """(Re)crée les créneaux de la chaîne : Shorts (vertical) et vidéos longues (horizontal)."""
         if not self.sched:
             return
-        for job in list(self.sched.get_jobs()):
-            if job.id.startswith(f"slot:{ch.id}:"):
-                job.remove()
+        self.remove_channel(ch.id)
         if not ch.active:
             return
-        for t in ch.schedule_times or []:
-            m = TIME_RE.match(t)
-            if not m:
-                continue
-            try:
-                trigger = CronTrigger(
-                    hour=int(m.group(1)), minute=int(m.group(2)), timezone=ch.timezone or self.svc.settings.timezone,
-                    jitter=max(0, ch.jitter_minutes) * 60 or None,
+        plans = []
+        if VideoFormat.VERTICAL in ch.formats_enabled():
+            plans.append((VideoFormat.VERTICAL, ch.schedule_times or []))
+        if VideoFormat.HORIZONTAL in ch.formats_enabled():
+            plans.append((VideoFormat.HORIZONTAL, ch.long_schedule_times or []))
+        for kind, times in plans:
+            for t in times:
+                m = TIME_RE.match(t)
+                if not m:
+                    continue
+                try:
+                    trigger = CronTrigger(
+                        hour=int(m.group(1)), minute=int(m.group(2)), timezone=ch.timezone or self.svc.settings.timezone,
+                        jitter=max(0, ch.jitter_minutes) * 60 or None,
+                    )
+                except Exception as exc:
+                    log.error("Créneau invalide %s pour %s: %s", t, ch.name, exc)
+                    continue
+                self.sched.add_job(
+                    self.svc.publish_slot, trigger, args=[ch.id, kind], id=f"slot:{ch.id}:{kind}:{t}",
+                    replace_existing=True, misfire_grace_time=1800, coalesce=True, max_instances=1,
                 )
-            except Exception as exc:
-                log.error("Créneau invalide %s pour %s: %s", t, ch.name, exc)
-                continue
-            self.sched.add_job(
-                self.svc.publish_slot, trigger, args=[ch.id], id=f"slot:{ch.id}:{t}",
-                replace_existing=True, misfire_grace_time=1800, coalesce=True, max_instances=1,
-            )
 
     def remove_channel(self, channel_id: int) -> None:
         if not self.sched:
@@ -96,20 +101,24 @@ class Scheduler:
             if job.id.startswith(f"slot:{channel_id}:"):
                 job.remove()
 
-    def next_run(self, channel_id: int) -> datetime | None:
+    def next_run(self, channel_id: int, kind: str | None = None) -> datetime | None:
         if not self.sched:
             return None
+        prefix = f"slot:{channel_id}:{kind}:" if kind else f"slot:{channel_id}:"
         times = [
             j.next_run_time for j in self.sched.get_jobs()
-            if j.id.startswith(f"slot:{channel_id}:") and j.next_run_time is not None
+            if j.id.startswith(prefix) and j.next_run_time is not None
         ]
         return min(times) if times else None
 
-    def upcoming(self, limit: int = 10) -> list[tuple[datetime, int]]:
+    def upcoming(self, limit: int = 10) -> list[tuple[datetime, int, str]]:
+        """Prochains créneaux : (date, chaîne, format)."""
         if not self.sched:
             return []
         out = []
         for j in self.sched.get_jobs():
             if j.id.startswith("slot:") and j.next_run_time is not None:
-                out.append((j.next_run_time, int(j.id.split(":")[1])))
+                parts = j.id.split(":")
+                kind = parts[2] if len(parts) > 3 else VideoFormat.VERTICAL
+                out.append((j.next_run_time, int(parts[1]), kind))
         return sorted(out)[:limit]

@@ -29,6 +29,8 @@ class RenderJob:
     music: Path | None = None
     music_volume: float = 0.0
     bg_volume: float = 0.0
+    width: int = 0  # 0 = réglages (vertical) ; 1920×1080 pour une vidéo longue
+    height: int = 0
 
 
 def _link_fonts(workdir: Path, fonts_dir: Path) -> str:
@@ -43,7 +45,7 @@ def _link_fonts(workdir: Path, fonts_dir: Path) -> str:
 
 
 async def render(job: RenderJob, settings: Settings, on_progress: ProgressCb | None = None) -> Path:
-    W, H, fps = settings.video_width, settings.video_height, settings.video_fps
+    W, H, fps = job.width or settings.video_width, job.height or settings.video_height, settings.video_fps
     workdir = job.ass_file.parent
     fonts_rel = _link_fonts(workdir, settings.fonts_dir)
     seg = job.segment
@@ -99,8 +101,9 @@ async def render(job: RenderJob, settings: Settings, on_progress: ProgressCb | N
         "-t", f"{job.duration:.3f}",
         "-c:v", "libx264", "-preset", settings.video_preset, "-crf", str(settings.video_crf),
         "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", str(fps),
-        "-c:a", "aac", "-b:a", "192k", "-ar", "44100",
-        "-movflags", "+faststart",
+        # Compatible Instagram/TikTok/YouTube : AAC 128 kb/s, moov en tête, sans liste d'édition
+        "-c:a", "aac", "-b:a", "128k", "-ar", "44100",
+        "-movflags", "+faststart", "-use_editlist", "0",
         str(job.output.resolve()),
     ]
     job.output.parent.mkdir(parents=True, exist_ok=True)
@@ -116,13 +119,21 @@ async def make_thumbnail(video: Path, out: Path, settings: Settings, at: float =
     return out
 
 
-async def make_telegram_preview(video: Path, out: Path, settings: Settings) -> Path:
-    """Version allégée (< 50 Mo) pour l'aperçu dans Telegram."""
-    if video.stat().st_size <= TELEGRAM_MAX_BYTES:
+async def make_telegram_preview(video: Path, out: Path, settings: Settings, *, duration: float = 0.0) -> Path:
+    """Version allégée (< 50 Mo) pour l'aperçu dans Telegram. Vidéo longue : les 90 premières secondes."""
+    long_video = duration > 180
+    if video.stat().st_size <= TELEGRAM_MAX_BYTES and not long_video:
         return video
-    await run_ffmpeg(
-        ["-i", str(video), "-vf", "scale=540:-2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
-         "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(out)],
-        ffmpeg=settings.ffmpeg_bin,
-    )
+    args = ["-i", str(video)]
+    if long_video:
+        args += ["-t", "90"]
+    args += ["-vf", "scale='min(960,iw)':-2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
+             "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(out)]
+    await run_ffmpeg(args, ffmpeg=settings.ffmpeg_bin)
+    return out
+
+
+async def grab_frame(video: Path, out: Path, settings: Settings, at: float) -> Path:
+    await run_ffmpeg(["-ss", f"{at:.2f}", "-i", str(video), "-frames:v", "1", "-q:v", "2", str(out)],
+                     ffmpeg=settings.ffmpeg_bin)
     return out

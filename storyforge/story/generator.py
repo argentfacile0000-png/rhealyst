@@ -136,23 +136,23 @@ class StoryGenerator:
             self._client = AsyncOpenAI(api_key=llm.api_key, base_url=llm.base_url, max_retries=2)
         return self._client
 
-    def _request_kwargs(self, messages: list[dict]) -> dict:
+    def _request_kwargs(self, messages: list[dict], long_form: bool = False) -> dict:
         llm = self.settings.llm
         kwargs: dict = {"model": llm.model, "messages": messages, "response_format": {"type": "json_object"}}
         if llm.provider == "openai":
             if _is_reasoning_model(llm.model):
-                kwargs["max_completion_tokens"] = 16000
+                kwargs["max_completion_tokens"] = 32000 if long_form else 16000
             else:
-                kwargs["max_completion_tokens"] = 4000
+                kwargs["max_completion_tokens"] = 12000 if long_form else 4000
                 kwargs["temperature"] = self.settings.openai_temperature
                 kwargs["presence_penalty"] = 0.3
         elif llm.provider == "gemini":
             # Les modèles Gemini récents « réfléchissent » : on limite la réflexion et on laisse de la marge.
-            kwargs["max_tokens"] = 8192
+            kwargs["max_tokens"] = 24000 if long_form else 8192
             kwargs["temperature"] = self.settings.openai_temperature
             kwargs["reasoning_effort"] = "low"
         else:
-            kwargs["max_tokens"] = 4096
+            kwargs["max_tokens"] = 12000 if long_form else 4096
             kwargs["temperature"] = self.settings.openai_temperature
         return kwargs
 
@@ -199,8 +199,8 @@ class StoryGenerator:
                                 "max_tokens": 64})
         return f"{llm.label} · {llm.model}"
 
-    async def _complete(self, messages: list[dict]) -> tuple[dict, int, int]:
-        resp = await self._create(self._request_kwargs(messages))
+    async def _complete(self, messages: list[dict], long_form: bool = False) -> tuple[dict, int, int]:
+        resp = await self._create(self._request_kwargs(messages, long_form))
         content = (resp.choices[0].message.content or "").strip()
         usage = resp.usage
         pt = getattr(usage, "prompt_tokens", 0) or 0
@@ -254,9 +254,10 @@ class StoryGenerator:
         custom_instructions: str = "",
         avoid_titles: list[str] | None = None,
         rng: random.Random | None = None,
+        long_form: bool = False,
     ) -> GeneratedStory:
         rng = rng or random.Random()
-        parts = max(1, min(int(parts), 6))
+        parts = 1 if long_form else max(1, min(int(parts), 6))
         valid = [f for f in (formats or []) if f in FORMATS] or DEFAULT_FORMATS
         fmt = FORMATS[rng.choice(valid)]
         lang = get_language(language)
@@ -272,9 +273,10 @@ class StoryGenerator:
             seconds_per_part=int(seconds_per_part),
             avoid_titles=avoid_titles or [],
             custom_instructions=custom_instructions,
+            long_form=long_form,
         )
         messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_prompt}]
-        data, pt, ct = await self._complete(messages)
+        data, pt, ct = await self._complete(messages, long_form)
         data = self._normalize(data, parts)
 
         total = sum(count_words(p) for p in data["parts"])
@@ -286,7 +288,7 @@ class StoryGenerator:
                 {"role": "user", "content": build_length_fix_prompt(total, words, parts)},
             ]
             try:
-                fixed, pt2, ct2 = await self._complete(messages)
+                fixed, pt2, ct2 = await self._complete(messages, long_form)
                 fixed = self._normalize(fixed, parts)
                 new_total = sum(count_words(p) for p in fixed["parts"])
                 if abs(new_total - target_total) < abs(total - target_total):

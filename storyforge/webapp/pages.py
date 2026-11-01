@@ -102,6 +102,13 @@ PLATFORMS = {
         "hint": "Si Google affiche « Application non validée », clique sur « Paramètres avancés » puis "
                 "« Accéder à StoryForge » : c'est ton application.",
     },
+    "instagram": {
+        "name": "Instagram",
+        "provider": "Instagram",
+        "scopes": ["Publier des Reels sur ton compte professionnel", "Lire ton nom d'utilisateur"],
+        "hint": "Il faut un compte Instagram professionnel (créateur ou entreprise). Instagram récupère chaque "
+                "vidéo sur ton serveur au moment de la publication.",
+    },
     "tiktok": {
         "name": "TikTok",
         "provider": "TikTok",
@@ -117,7 +124,7 @@ def e(value: object) -> str:
 
 def page(title: str, body: str, *, subtitle: str = "Connexion des comptes", note: str = "", status: int = 200) -> HTMLResponse:
     content = HEAD.format(title=e(title), subtitle=e(subtitle)) + body + FOOT.format(
-        note=e(note or "Tu peux révoquer l'accès à tout moment depuis les réglages de ton compte Google ou TikTok.")
+        note=e(note or "Tu peux révoquer l'accès à tout moment depuis les réglages de ton compte Google, TikTok ou Instagram.")
     )
     return HTMLResponse(content, status_code=status, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
@@ -128,9 +135,9 @@ def alert(kind: str, text: str) -> str:
 
 def _platform_card(platform: str, ch: Channel, token: str, *, problem: str | None, automatic: bool) -> str:
     meta = PLATFORMS[platform]
-    linked = ch.youtube_linked if platform == "youtube" else ch.tiktok_linked
-    account = ch.youtube_account if platform == "youtube" else ch.tiktok_account
-    enabled = ch.youtube_enabled if platform == "youtube" else ch.tiktok_enabled
+    linked = getattr(ch, f"{platform}_linked")
+    account = getattr(ch, f"{platform}_account")
+    enabled = getattr(ch, f"{platform}_enabled")
     if linked:
         badge = f'<span class="text-xs px-2.5 py-1 rounded-full {BADGE["success"]}">Connecté</span>'
     elif problem:
@@ -198,12 +205,12 @@ def portal(ch: Channel, token: str, expires: int, *, problems: dict[str, str | N
         '<p class="text-sm text-muted mb-3">Chaîne</p>',
         f'<h1 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">{e(ch.name)}</h1>',
         '<p class="text-muted leading-relaxed mb-10 max-w-xl">Connecte les comptes sur lesquels cette chaîne publiera. '
-        "Tu seras redirigé vers Google ou TikTok pour autoriser StoryForge, puis ramené ici.</p>",
+        "Tu seras redirigé vers la plateforme pour autoriser StoryForge, puis ramené ici.</p>",
     ]
     if flash:
         parts.append(alert(*flash))
     parts.append('<div class="space-y-4">')
-    for platform in ("youtube", "tiktok"):
+    for platform in ("youtube", "tiktok", "instagram"):
         parts.append(_platform_card(platform, ch, token, problem=problems.get(platform), automatic=automatic.get(platform, False)))
     parts.append("</div>")
     return page(f"Comptes · {ch.name}", "\n".join(parts), note=f"Ce lien expire à {until}. Tu peux en générer un nouveau depuis le bot.")
