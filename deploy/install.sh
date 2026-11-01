@@ -129,23 +129,39 @@ if [ ! -s "$APP/.env" ] || ! grep -q '^TELEGRAM_BOT_TOKEN=.' "$APP/.env"; then
   ask TELEGRAM_BOT_TOKEN "Token du bot Telegram (BotFather)" secret
   ask TELEGRAM_ADMIN_IDS "Ton identifiant Telegram (plusieurs : 111,222)"
   ask ELEVENLABS_API_KEY "Clé API ElevenLabs" secret
-  ask OPENAI_API_KEY "Clé API OpenAI (Entrée pour l'ajouter plus tard)" secret optional
   umask 077
   set_env TELEGRAM_BOT_TOKEN "$TELEGRAM_BOT_TOKEN"
   set_env TELEGRAM_ADMIN_IDS "$TELEGRAM_ADMIN_IDS"
   set_env ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
-  set_env OPENAI_API_KEY "${OPENAI_API_KEY:-}"
   ok "Clés enregistrées"
 else
   ok ".env existant conservé"
 fi
 chmod 600 "$APP/.env"
-grep -q '^OPENAI_MODEL=' "$APP/.env" || set_env OPENAI_MODEL "gpt-4.1"
+
+# IA qui écrit les histoires (demandée tant qu'aucune clé n'est renseignée)
+if ! grep -qE '^(GEMINI_API_KEY|GROQ_API_KEY|OPENAI_API_KEY)=.' "$APP/.env"; then
+  provider="${LLM_PROVIDER:-}"
+  if [ -z "$provider" ] && has_tty; then
+    echo "  IA qui écrit les histoires :"
+    echo "    1) Google Gemini   gratuit · clé sur https://aistudio.google.com/apikey"
+    echo "    2) Groq            gratuit · clé sur https://console.groq.com/keys"
+    echo "    3) OpenAI          payant  · clé sur https://platform.openai.com/api-keys"
+    read -r -p "  Choix [1] : " choice </dev/tty || true
+    case "${choice:-1}" in 2) provider=groq ;; 3) provider=openai ;; *) provider=gemini ;; esac
+  fi
+  provider="${provider:-gemini}"
+  case "$provider" in groq) key_var=GROQ_API_KEY ;; openai) key_var=OPENAI_API_KEY ;; *) provider=gemini; key_var=GEMINI_API_KEY ;; esac
+  ask "$key_var" "Clé API $provider (Entrée pour l'ajouter plus tard)" secret optional
+  set_env LLM_PROVIDER "$provider"
+  if [ -n "${!key_var:-}" ]; then set_env "$key_var" "${!key_var}"; ok "IA : $provider"; fi
+fi
+grep -qE '^(GEMINI_API_KEY|GROQ_API_KEY|OPENAI_API_KEY)=.' "$APP/.env" \
+  || warn "Aucune clé d'IA pour écrire les histoires : relance le script pour l'ajouter (Gemini est gratuit)."
 grep -q '^TIMEZONE=' "$APP/.env" || set_env TIMEZONE "Europe/Paris"
 set_env DATA_DIR "$APP/data"
 set_env FONTS_DIR "$APP/src/assets/fonts"
 grep -q '^GOOGLE_CLIENT_SECRETS_FILE=' "$APP/.env" || set_env GOOGLE_CLIENT_SECRETS_FILE "$APP/secrets/google_client_secret.json"
-grep -q '^OPENAI_API_KEY=.' "$APP/.env" || warn "Pas de clé OpenAI : ajoute OPENAI_API_KEY dans $APP/.env puis relance le script."
 
 # ---------------------------------------------------------------- 6. HTTPS (optionnel)
 if [ "$WITH_HTTPS" = 1 ]; then

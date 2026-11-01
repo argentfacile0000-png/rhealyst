@@ -120,8 +120,8 @@ class Services:
     def missing_prereqs(self) -> list[str]:
         s = self.settings
         missing = []
-        if not s.openai_api_key:
-            missing.append("OPENAI_API_KEY")
+        if not s.llm.api_key:
+            missing.append(f"{s.llm.env} (IA des histoires)")
         if not s.elevenlabs_api_key:
             missing.append("ELEVENLABS_API_KEY")
         if not self.pipeline.bank.categories():

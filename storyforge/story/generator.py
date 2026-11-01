@@ -8,6 +8,7 @@ import random
 import re
 from dataclasses import dataclass, field
 
+import openai
 from openai import AsyncOpenAI
 
 from ..config import Settings
@@ -99,6 +100,23 @@ def _split_evenly(text: str, n: int) -> list[str]:
     return [" ".join(p) for p in parts if p]
 
 
+def _error_text(exc: Exception) -> str:
+    """Texte complet d'une erreur d'API (certains fournisseurs mettent le message dans le corps)."""
+    parts = [str(exc), str(getattr(exc, "body", "") or "")]
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            parts.append(response.text)
+        except Exception:
+            pass
+    return " ".join(p for p in parts if p)
+
+
+def _is_key_error(exc: Exception) -> bool:
+    text = _error_text(exc).lower()
+    return "api key" in text or "api_key" in text
+
+
 def _is_reasoning_model(model: str) -> bool:
     m = model.lower()
     return m.startswith(("o1", "o3", "o4", "gpt-5"))
@@ -112,29 +130,82 @@ class StoryGenerator:
     @property
     def client(self) -> AsyncOpenAI:
         if self._client is None:
-            if not self.settings.openai_api_key:
-                raise StoryError("OPENAI_API_KEY manquant dans le .env")
-            self._client = AsyncOpenAI(api_key=self.settings.openai_api_key, base_url=self.settings.openai_base_url)
+            llm = self.settings.llm
+            if not llm.api_key:
+                raise StoryError(f"{llm.env} manquant dans le .env (IA qui écrit les histoires)")
+            self._client = AsyncOpenAI(api_key=llm.api_key, base_url=llm.base_url, max_retries=2)
         return self._client
 
-    async def _complete(self, messages: list[dict]) -> tuple[dict, int, int]:
-        model = self.settings.openai_model
-        kwargs: dict = {
-            "model": model,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-        }
-        if _is_reasoning_model(model):
-            kwargs["max_completion_tokens"] = 16000
-        else:
-            kwargs["max_completion_tokens"] = 4000
+    def _request_kwargs(self, messages: list[dict]) -> dict:
+        llm = self.settings.llm
+        kwargs: dict = {"model": llm.model, "messages": messages, "response_format": {"type": "json_object"}}
+        if llm.provider == "openai":
+            if _is_reasoning_model(llm.model):
+                kwargs["max_completion_tokens"] = 16000
+            else:
+                kwargs["max_completion_tokens"] = 4000
+                kwargs["temperature"] = self.settings.openai_temperature
+                kwargs["presence_penalty"] = 0.3
+        elif llm.provider == "gemini":
+            # Les modèles Gemini récents « réfléchissent » : on limite la réflexion et on laisse de la marge.
+            kwargs["max_tokens"] = 8192
             kwargs["temperature"] = self.settings.openai_temperature
-            kwargs["presence_penalty"] = 0.3
-        resp = await self.client.chat.completions.create(**kwargs)
+            kwargs["reasoning_effort"] = "low"
+        else:
+            kwargs["max_tokens"] = 4096
+            kwargs["temperature"] = self.settings.openai_temperature
+        return kwargs
+
+    async def _create(self, kwargs: dict):
+        llm = self.settings.llm
+        invalid_key = StoryError(f"Clé API {llm.label} invalide ({llm.env})")
+        try:
+            try:
+                return await self.client.chat.completions.create(**kwargs)
+            except openai.BadRequestError as exc:
+                if _is_key_error(exc):  # Gemini signale une clé invalide en 400
+                    raise invalid_key from exc
+                # Paramètre non pris en charge par ce fournisseur : nouvel essai avec le strict minimum.
+                log.warning("%s a refusé la requête (%s) — nouvel essai simplifié", llm.label, exc)
+                minimal = {"model": kwargs["model"], "messages": kwargs["messages"]}
+                try:
+                    return await self.client.chat.completions.create(**minimal)
+                except openai.BadRequestError as exc2:
+                    if _is_key_error(exc2):
+                        raise invalid_key from exc2
+                    raise StoryError(f"{llm.label} a refusé la requête : {_error_text(exc2)[:200]}") from exc2
+        except openai.RateLimitError as exc:
+            raise StoryError(
+                f"Limite de {llm.label} atteinte pour le moment"
+                + (" (offre gratuite)" if llm.free else "") + ", réessaie un peu plus tard"
+            ) from exc
+        except openai.AuthenticationError as exc:
+            raise StoryError(f"Clé API {llm.label} invalide ({llm.env})") from exc
+        except openai.NotFoundError as exc:
+            raise StoryError(f"Modèle « {llm.model} » introuvable chez {llm.label} : change LLM_MODEL dans le .env") from exc
+        except openai.APIConnectionError as exc:
+            raise StoryError(f"{llm.label} injoignable : {exc}") from exc
+
+    async def ping(self) -> str:
+        """Vérifie la clé et le modèle avec une requête minuscule. Retourne « fournisseur · modèle »."""
+        llm = self.settings.llm
+        if llm.provider == "openai":
+            try:
+                await self.client.models.retrieve(llm.model)
+            except openai.AuthenticationError as exc:
+                raise StoryError(f"Clé API {llm.label} invalide ({llm.env})") from exc
+        else:
+            await self._create({"model": llm.model, "messages": [{"role": "user", "content": "Réponds juste OK."}],
+                                "max_tokens": 64})
+        return f"{llm.label} · {llm.model}"
+
+    async def _complete(self, messages: list[dict]) -> tuple[dict, int, int]:
+        resp = await self._create(self._request_kwargs(messages))
         content = (resp.choices[0].message.content or "").strip()
         usage = resp.usage
         pt = getattr(usage, "prompt_tokens", 0) or 0
         ct = getattr(usage, "completion_tokens", 0) or 0
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content)
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
@@ -233,7 +304,7 @@ class StoryGenerator:
             description=data["description"],
             hashtags=data["hashtags"],
             tiktok_caption=data["tiktok_caption"],
-            model=self.settings.openai_model,
+            model=self.settings.llm.model,
             prompt_tokens=pt,
             completion_tokens=ct,
             dna=dna.as_prompt(),

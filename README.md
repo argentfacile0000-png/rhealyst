@@ -1,7 +1,7 @@
 # 🎬 StoryForge
 
 **Usine à vidéos « storytime » automatisées, pilotée depuis un dashboard Telegram.**
-Histoires originales écrites par ChatGPT → voix off ElevenLabs → séquence de fond tirée au hasard
+Histoires originales écrites par une IA (Gemini ou Groq gratuits, ou OpenAI) → voix off ElevenLabs → séquence de fond tirée au hasard
 → sous-titres mot à mot → publication automatique sur **YouTube Shorts** et **TikTok**,
 avec **plusieurs instances** (chaînes) qui publient chacune sur leurs propres comptes.
 
@@ -9,7 +9,7 @@ avec **plusieurs instances** (chaînes) qui publient chacune sur leurs propres c
  ⏰ Créneau / ⚡ bouton
         │
         ▼
- 🧠 ChatGPT ──► histoire originale (accroche, parties, titre, hashtags)
+ 🧠 IA (Gemini, Groq, OpenAI) ──► histoire originale (accroche, parties, titre, hashtags)
         │
         ▼
  🎙 ElevenLabs ──► voix + horodatage de chaque mot ──► silences resserrés, accélération
@@ -85,8 +85,21 @@ Seuls les comptes listés dans `TELEGRAM_ADMIN_IDS` peuvent utiliser le bot.
 
 - Python 3.11+ et **ffmpeg** (avec libass), ou Docker
 - Un bot Telegram (créé avec [@BotFather](https://t.me/BotFather))
-- Une clé API OpenAI et une clé API ElevenLabs
+- Une clé API ElevenLabs et une clé d'IA pour écrire les histoires : **Gemini ou Groq (gratuits)**, ou OpenAI (payant)
 - Pour publier : un projet Google Cloud (YouTube) et/ou une app TikTok for Developers
+
+### IA des histoires : gratuite ou payante
+
+| Fournisseur | Coût | Clé | Modèle par défaut |
+|---|---|---|---|
+| Google Gemini | gratuit (modèles Flash, limites par minute et par jour) | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `gemini-flash-latest` |
+| Groq | gratuit (limites par minute et par jour) | [console.groq.com/keys](https://console.groq.com/keys) | `llama-3.3-70b-versatile` |
+| OpenAI | payant à l'usage (l'abonnement ChatGPT Plus ne donne pas accès à l'API) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | `gpt-4.1` |
+
+Renseigne une seule clé (`GEMINI_API_KEY`, `GROQ_API_KEY` ou `OPENAI_API_KEY`) : le fournisseur est choisi
+automatiquement, ou force-le avec `LLM_PROVIDER`. `LLM_MODEL` permet de changer de modèle. Une vidéo ne demande
+qu'une ou deux requêtes, très en dessous des limites gratuites. Avec l'offre gratuite de Gemini, Google peut utiliser
+les requêtes pour améliorer ses services : ce n'est pas gênant pour des histoires inventées.
 
 ### Avec Docker (recommandé)
 
@@ -106,7 +119,8 @@ curl -fsSL https://raw.githubusercontent.com/argentfacile0000-png/rhealyst/refs/
 bash install.sh
 ```
 
-Le script demande le token Telegram, ton identifiant Telegram, la clé ElevenLabs et la clé OpenAI, puis installe
+Le script demande le token Telegram, ton identifiant Telegram, la clé ElevenLabs et le fournisseur d'IA
+(Gemini gratuit par défaut) avec sa clé, puis installe
 ffmpeg, un Python 3.12 isolé et le service `storyforge` (redémarrage automatique). Il ne supprime rien en dehors de
 `~/storyforge` et refuse d'écraser un dossier ou un service qui ne lui appartient pas. Relancer le script met à jour
 le code en gardant la configuration, les vidéos et la base.
@@ -137,7 +151,7 @@ La vidéo est écrite dans `data/demo/`.
 ### Tester le prompt d'histoire
 
 ```bash
-python -m storyforge story --lang fr --format askreddit --parts 2 --seconds 80
+python -m storyforge story --lang fr --format askreddit --parts 2 --seconds 80   # nécessite une clé d'IA
 ```
 
 ---
@@ -228,7 +242,7 @@ storyforge/
 ├── scheduler.py         # créneaux par chaîne (APScheduler) + réapprovisionnement
 ├── jobs.py              # files asynchrones (rendus / publications)
 ├── stats.py             # agrégats pour les dashboards
-├── story/               # prompts, formats, ADN aléatoire, client OpenAI
+├── story/               # prompts, formats, ADN aléatoire, client IA (Gemini, Groq, OpenAI)
 ├── tts/                 # ElevenLabs (avec horodatage) + resserrage des silences
 ├── video/               # banque de fonds, sous-titres ASS, carte d'accroche, rendu ffmpeg
 ├── publishers/          # YouTube Data API v3 · TikTok Content Posting API
@@ -244,14 +258,14 @@ pytest
 ```
 
 Les tests couvrent le découpage mot à mot, le resserrage des silences, le tirage du fond, les sous-titres,
-la génération d'histoire (OpenAI simulé), le pipeline complet avec ffmpeg réel (APIs simulées), l'API de la
+la génération d'histoire (IA simulée, dont le repli si un paramètre est refusé), le pipeline complet avec ffmpeg réel (APIs simulées), l'API de la
 Mini App, et la navigation complète du bot Telegram.
 
 ---
 
 ## Bon à savoir
 
-- **Coûts** : une vidéo de 90 s ≈ 1 500-2 000 caractères ElevenLabs et ~3 000 tokens OpenAI.
+- **Coûts** : une vidéo de 90 s ≈ 1 500-2 000 caractères ElevenLabs et ~3 000 tokens d'IA (gratuits avec Gemini ou Groq).
 - **Telegram** limite les envois de bot à 50 Mo (un aperçu allégé est généré si besoin) et les téléchargements à 20 Mo
   (pour de gros fonds, utilise un lien ou dépose-les dans `data/backgrounds/`).
 - **Politiques des plateformes** : YouTube et TikTok peuvent limiter la monétisation des contenus jugés « réutilisés » ou

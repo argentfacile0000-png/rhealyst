@@ -290,10 +290,9 @@ async def test_apis(svc: Services) -> screens.Screen:
         lines.append(f"{'✓' if ok else '✕'}  {label}  <i>{esc(detail)}</i>")
 
     try:
-        await svc.pipeline.stories.client.models.retrieve(s.openai_model)
-        check(True, "OpenAI", f"modèle {s.openai_model} accessible")
+        check(True, "IA des histoires", await svc.pipeline.stories.ping())
     except Exception as exc:
-        check(False, "OpenAI", str(exc)[:150])
+        check(False, f"IA des histoires ({s.llm.label})", str(exc)[:150])
     try:
         sub = await svc.pipeline.tts.subscription()
         check(True, "ElevenLabs", f"forfait {sub.get('tier', '?')}, "

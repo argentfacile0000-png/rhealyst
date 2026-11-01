@@ -208,3 +208,71 @@ def test_validate_init_data():
     assert validate_init_data(good, "999:other") is None
     assert validate_init_data(good.replace("Ana", "Bob"), token) is None
     assert validate_init_data(_init_data(token, 42, age=200000), token) is None
+
+
+# ---------------------------------------------------------------- fournisseurs d'IA
+def test_llm_provider_resolution(settings):
+    settings.openai_api_key = ""
+    assert settings.llm.provider == "openai" and not settings.llm.api_key
+    settings.groq_api_key = "q"
+    assert settings.llm.provider == "groq" and settings.llm.base_url == "https://api.groq.com/openai/v1"
+    settings.gemini_api_key = "g"
+    llm = settings.llm
+    assert llm.provider == "gemini" and llm.free and llm.model == "gemini-flash-latest"
+    assert llm.base_url == "https://generativelanguage.googleapis.com/v1beta/openai/"
+    settings.llm_provider = "groq"
+    settings.llm_model = "openai/gpt-oss-120b"
+    assert settings.llm.provider == "groq" and settings.llm.model == "openai/gpt-oss-120b"
+
+
+class _FlakyCompletions:
+    """Refuse le premier appel (paramètre non supporté), puis répond."""
+
+    def __init__(self, payload, error):
+        self.payload, self.error, self.calls = payload, error, []
+
+    async def create(self, **kwargs):
+        from types import SimpleNamespace
+
+        self.calls.append(kwargs)
+        if self.error and len(self.calls) == 1:
+            raise self.error
+        msg = SimpleNamespace(content="```json\n" + json.dumps(self.payload) + "\n```")
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)],
+                               usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20))
+
+
+def _api_error(cls, status):
+    import httpx
+
+    return cls("erreur", response=httpx.Response(status, request=httpx.Request("POST", "https://x")), body=None)
+
+
+async def test_gemini_params_and_fallback(settings):
+    import openai
+    from types import SimpleNamespace
+
+    settings.openai_api_key = ""
+    settings.gemini_api_key = "g"
+    comp = _FlakyCompletions(STORY_JSON, _api_error(openai.BadRequestError, 400))
+    gen = StoryGenerator(settings, client=SimpleNamespace(chat=SimpleNamespace(completions=comp)))
+    story = await gen.generate(language="fr", parts=2, seconds_per_part=10)
+    first, retry = comp.calls[0], comp.calls[1]
+    assert first["model"] == "gemini-flash-latest" and first["max_tokens"] == 8192 and first["reasoning_effort"] == "low"
+    assert "presence_penalty" not in first and "max_completion_tokens" not in first
+    assert set(retry) == {"model", "messages"}  # nouvel essai minimal
+    assert story.model == "gemini-flash-latest" and len(story.parts) == 2
+
+
+async def test_free_tier_limit_message(settings):
+    import openai
+    from types import SimpleNamespace
+
+    from storyforge.story import StoryError
+
+    settings.openai_api_key = ""
+    settings.groq_api_key = "q"
+    comp = _FlakyCompletions(STORY_JSON, _api_error(openai.RateLimitError, 429))
+    gen = StoryGenerator(settings, client=SimpleNamespace(chat=SimpleNamespace(completions=comp)))
+    with pytest.raises(StoryError, match="Limite de Groq atteinte.*gratuite"):
+        await gen.generate(language="fr", parts=1, seconds_per_part=10)

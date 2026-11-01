@@ -510,7 +510,7 @@ async def stats(svc: Services) -> Screen:
         lines.append(muted("Aucune chaîne."))
     t = o["today"]
     lines += ["", "<b>Consommation du jour</b>",
-              row("OpenAI", f"{kfmt(t['openai_tokens'])} tokens"),
+              row(svc.settings.llm.label, f"{kfmt(t['openai_tokens'])} tokens"),
               row("ElevenLabs", f"{kfmt(t['tts_chars'])} caractères")]
     q = o["quota"]
     if q and q.get("limit"):
@@ -561,7 +561,7 @@ async def settings_screen(svc: Services) -> Screen:
         row("Suivi en direct des générations auto", "activé" if live else "désactivé"),
         "",
         "<b>Configuration</b>",
-        row("OpenAI", s.openai_model),
+        row("IA des histoires", f"{s.llm.label}, {s.llm.model}" + (" (gratuit)" if s.llm.free else "")),
         row("ElevenLabs", s.elevenlabs_model),
         row("Rendu", f"{s.video_width}×{s.video_height}, CRF {s.video_crf}, {s.max_concurrent_renders} à la fois"),
         row("Conservation des fichiers", plural(s.keep_videos_days, "jour")),

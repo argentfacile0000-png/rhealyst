@@ -4,8 +4,29 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import NamedTuple
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class LLMConfig(NamedTuple):
+    provider: str
+    label: str
+    base_url: str | None
+    model: str
+    api_key: str
+    env: str  # nom de la variable de la clé dans le .env
+    free: bool
+
+
+LLM_PROVIDERS: dict[str, dict] = {
+    "gemini": {"label": "Google Gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+               "model": "gemini-flash-latest", "key": "gemini_api_key", "env": "GEMINI_API_KEY", "free": True},
+    "groq": {"label": "Groq", "base_url": "https://api.groq.com/openai/v1",
+             "model": "llama-3.3-70b-versatile", "key": "groq_api_key", "env": "GROQ_API_KEY", "free": True},
+    "openai": {"label": "OpenAI", "base_url": None,
+               "model": "gpt-4.1", "key": "openai_api_key", "env": "OPENAI_API_KEY", "free": False},
+}
 
 
 class Settings(BaseSettings):
@@ -16,10 +37,15 @@ class Settings(BaseSettings):
     # IDs Telegram autorisés à piloter le système, séparés par des virgules.
     telegram_admin_ids: str = ""
 
-    # --- OpenAI (ChatGPT) ---------------------------------------------------
-    openai_api_key: str = ""
+    # --- IA qui écrit les histoires ------------------------------------------
+    # auto | gemini | groq | openai — « auto » prend le premier fournisseur dont la clé est renseignée.
+    llm_provider: str = "auto"
+    llm_model: str = ""  # vide = modèle par défaut du fournisseur
+    gemini_api_key: str = ""  # Google AI Studio (offre gratuite)
+    groq_api_key: str = ""  # Groq (offre gratuite)
+    openai_api_key: str = ""  # OpenAI (payant)
     openai_model: str = "gpt-4.1"
-    openai_base_url: str | None = None
+    openai_base_url: str | None = None  # API compatible OpenAI personnalisée
     openai_temperature: float = 0.95
 
     # --- ElevenLabs ---------------------------------------------------------
@@ -70,6 +96,19 @@ class Settings(BaseSettings):
     secret_key: str = ""
 
     # ------------------------------------------------------------------------
+    @property
+    def llm(self) -> LLMConfig:
+        """Fournisseur d'IA effectif pour l'écriture des histoires."""
+        name = (self.llm_provider or "auto").lower()
+        if name not in LLM_PROVIDERS:
+            name = "auto"
+        if name == "auto":
+            name = next((n for n in ("gemini", "groq", "openai") if getattr(self, LLM_PROVIDERS[n]["key"])), "openai")
+        preset = LLM_PROVIDERS[name]
+        model = self.llm_model or (self.openai_model if name == "openai" else preset["model"])
+        base_url = self.openai_base_url if name == "openai" and self.openai_base_url else preset["base_url"]
+        return LLMConfig(name, preset["label"], base_url, model, getattr(self, preset["key"]), preset["env"], preset["free"])
+
     @property
     def admin_ids(self) -> set[int]:
         ids: set[int] = set()
