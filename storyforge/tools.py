@@ -294,8 +294,10 @@ async def test_proxy_list(on_progress=None, concurrency: int = 64, per_proxy: fl
 
 
 class YtdlpResult:
-    def __init__(self, returncode: int, out: bytes, err: bytes, proxy: str | None, attempts: int):
+    def __init__(self, returncode: int, out: bytes, err: bytes, proxy: str | None, attempts: int,
+                 cancelled: bool = False):
         self.returncode, self.out, self.err, self.proxy, self.attempts = returncode, out, err, proxy, attempts
+        self.cancelled = cancelled
 
     @property
     def ok(self) -> bool:
@@ -306,9 +308,47 @@ class YtdlpResult:
         return self.err.decode("utf-8", "replace")
 
 
-async def run_ytdlp(settings: Settings, args: list[str], *, timeout: float = 3600) -> YtdlpResult:
-    """Lance yt-dlp ; avec une liste de proxies, passe au suivant tant que le téléchargement échoue."""
+PROGRESS_TAG = "SFPROG"
+PROGRESS_TEMPLATE = (f"download:{PROGRESS_TAG} %(progress._percent_str)s|%(progress._speed_str)s|"
+                     "%(progress._eta_str)s|%(progress._total_bytes_str)s%(progress._total_bytes_estimate_str)s")
+
+
+def _kill_group(proc) -> None:
+    import signal
+
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+
+
+def parse_progress(line: str) -> dict | None:
+    if PROGRESS_TAG not in line:
+        return None
+    parts = [p.strip() for p in line.split(PROGRESS_TAG, 1)[1].split("|")]
+    parts += [""] * (4 - len(parts))
+    try:
+        pct = float(parts[0].rstrip("%"))
+    except ValueError:
+        pct = 0.0
+    size = re.search(r"\d+(?:\.\d+)?\s*[KMGT]?i?B", parts[3])
+    speed = parts[1] if re.search(r"\d", parts[1]) else ""  # « Unknown B/s », « N/A » au démarrage
+    eta = parts[2] if re.search(r"\d", parts[2]) else ""
+    return {"percent": pct, "speed": speed, "eta": eta, "size": size.group(0) if size else ""}
+
+
+async def run_ytdlp(settings: Settings, args: list[str], *, timeout: float = 3 * 3600, on_progress=None,
+                    cancel=None, stall: float = 120.0) -> YtdlpResult:
+    """Lance yt-dlp ; avec une liste de proxies, passe au suivant tant que le téléchargement échoue.
+
+    on_progress(dict) reçoit l'avancement (pourcentage, vitesse, temps restant, proxy essayé). Un téléchargement
+    qui n'avance plus depuis `stall` secondes est coupé (proxy suivant), `cancel` (asyncio.Event) l'annule.
+    """
     import asyncio
+    import time
 
     from . import db
 
@@ -322,24 +362,77 @@ async def run_ytdlp(settings: Settings, args: list[str], *, timeout: float = 360
         rotation = await proxy_rotation()
         if rotation:
             candidates = list(rotation[:MAX_ATTEMPTS])
+    progress_args = ["--newline", "--progress", "--progress-template", PROGRESS_TEMPLATE] if on_progress else []
     result = YtdlpResult(1, b"", b"", None, 0)
     for attempt, proxy in enumerate(candidates, start=1):
         extra = ["--proxy", proxy, "--socket-timeout", "20"] if proxy else []
-        proc = await asyncio.create_subprocess_exec(*exe, *base, *extra, *args,
-                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            proc.kill()
-            out, err = b"", "délai d'attente dépassé".encode()
-        code = proc.returncode if proc.returncode is not None else 1
-        result = YtdlpResult(code, out, err, proxy, attempt)
+        if on_progress:
+            await on_progress({"percent": 0.0, "speed": "", "eta": "", "size": "", "attempt": attempt,
+                               "attempts": len(candidates), "proxy": proxy, "phase": "start"})
+        # Groupe de processus à part : l'annulation coupe aussi les enfants de yt-dlp (ffmpeg…)
+        proc = await asyncio.create_subprocess_exec(*exe, *base, *extra, *progress_args, *args,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                                    start_new_session=True)
+        out_lines: list[bytes] = []
+        err_lines: list[bytes] = []
+        state = {"activity": time.monotonic(), "percent": 0.0}
+
+        async def pump(stream, sink: list[bytes]) -> None:
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                info = parse_progress(line.decode("utf-8", "replace"))
+                if info is None:
+                    sink.append(line)
+                    continue
+                if info["percent"] != state["percent"]:
+                    state["activity"] = time.monotonic()
+                state["percent"] = info["percent"]
+                if on_progress:
+                    info.update(attempt=attempt, attempts=len(candidates), proxy=proxy, phase="download")
+                    try:
+                        await on_progress(info)
+                    except Exception:
+                        pass
+
+        readers = asyncio.ensure_future(asyncio.gather(pump(proc.stdout, out_lines), pump(proc.stderr, err_lines)))
+        started, reason = time.monotonic(), ""
+        while not readers.done():
+            await asyncio.wait({readers}, timeout=1)
+            if readers.done():
+                break
+            now = time.monotonic()
+            if cancel is not None and cancel.is_set():
+                reason = "cancel"
+            elif on_progress and state["percent"] < 99.9 and now - state["activity"] > stall:
+                reason = "stall"  # plus aucune progression (proxy mort ou trop lent)
+            elif now - started > timeout:
+                reason = "timeout"
+            if reason:
+                _kill_group(proc)
+                break
+        if reason:  # les sorties se ferment avec le groupe ; on n'attend pas indéfiniment
+            try:
+                await asyncio.wait_for(asyncio.shield(readers), timeout=5)
+            except asyncio.TimeoutError:
+                readers.cancel()
+        await asyncio.gather(readers, return_exceptions=True)
+        code = await proc.wait()
+        out, err = b"".join(out_lines), b"".join(err_lines)
+        if reason == "cancel":
+            return YtdlpResult(130, out, "téléchargement annulé".encode(), proxy, attempt, cancelled=True)
+        if reason == "stall":
+            err += f"\naucune progression depuis {int(stall)} s".encode()
+        elif reason == "timeout":
+            err += "\ndélai d'attente dépassé".encode()
+        result = YtdlpResult(1 if reason else code, out, err, proxy, attempt)
         if result.ok:
             if proxy:
                 await mark_proxy(proxy, True)
             return result
         if proxy:
             await mark_proxy(proxy, False)
-        if any(s in result.error.lower() for s in NOT_RETRYABLE):
+        if any(x in result.error.lower() for x in NOT_RETRYABLE):
             break
     return result

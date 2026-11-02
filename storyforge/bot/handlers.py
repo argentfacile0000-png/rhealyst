@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,7 +32,7 @@ from ..video.background import VIDEO_EXTS
 from . import screens
 from .access import AccessGate
 from .fields import FIELD_MAP
-from .ui import PLATFORM, esc, kb
+from .ui import PLATFORM, bar, esc, kb
 
 if TYPE_CHECKING:
     from ..core import Services
@@ -566,6 +567,13 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await ytdlp_action(update, context, head)
     elif head in ("mua", "mut", "mup", "mud", "muD", "mue"):
         await music_action(update, context, head, parts)
+    elif head == "dlx":
+        event = DOWNLOADS.get(parts[1] if len(parts) > 1 else "")
+        if event is None:
+            await q.answer("Ce téléchargement est déjà terminé")
+            return
+        event.set()
+        await q.answer("Annulation…")
     elif head in ("lkc", "lkn", "lkm"):
         await link_destination(update, context, head, parts)
     elif head == "bkn":
@@ -938,30 +946,90 @@ def _cat_index(svc: Services, category: str) -> int:
     return cats.index(category) if category in cats else 0
 
 
-async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: str, category: str) -> None:
+DOWNLOADS: dict[str, asyncio.Event] = {}  # téléchargements en cours (jeton -> annulation)
+
+
+async def ytdlp_download(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: str, *, dest_dir: Path,
+                         label: str, args: list[str]):
+    """Télécharge avec yt-dlp en affichant l'avancement (bouton Annuler). Retourne (fichier final, message)."""
+    import secrets
+    import time
+
     svc = svc_of(context)
     if not ytdlp_command():
         await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : relance install.sh sur le serveur")
+        return None, None
+    token = secrets.token_hex(4)
+    cancel = DOWNLOADS[token] = asyncio.Event()
+    work = svc.settings.work_dir / f"dl-{token}"  # les morceaux partiels restent ici, jamais dans la banque
+    work.mkdir(parents=True, exist_ok=True)
+    stop_kb = kb([[("Annuler", f"dlx:{token}")]])
+    info = await context.bot.send_message(chat_id, f"Téléchargement {label}…\nPréparation.", reply_markup=stop_kb)
+    last = {"t": 0.0, "text": ""}
+
+    async def progress(p: dict) -> None:
+        now = time.monotonic()
+        if p.get("phase") == "download" and now - last["t"] < 4 and p["percent"] < 100:
+            return
+        lines = [f"Téléchargement {label}…"]
+        if p.get("phase") == "start":
+            lines.append("Connexion à la vidéo…")
+        else:
+            lines.append(f"{bar(p['percent'] / 100, 12)}  {p['percent']:.0f} %")
+            lines.append(" · ".join(x for x in (p.get("speed"), f"reste {p['eta']}" if p.get("eta") else "",
+                                                 p.get("size")) if x) or "")
+            if p["percent"] >= 99.9:
+                lines.append("Assemblage de la vidéo…")
+        if p.get("proxy"):
+            lines.append(f"Proxy {p['attempt']}/{p['attempts']}")
+        text = "\n".join(x for x in lines if x)
+        if text == last["text"]:
+            return
+        last.update(t=now, text=text)
+        try:
+            await info.edit_text(text, reply_markup=stop_kb)
+        except TelegramError:
+            pass
+
+    try:
+        with svc.jobs.hold():  # la mise à jour automatique attend la fin du téléchargement
+            res = await run_ytdlp(svc.settings, [
+                *args, "--no-playlist", "--restrict-filenames", "-o", str(work / "%(title).60s-%(id)s.%(ext)s"),
+                "--print", "after_move:filepath", "--no-warnings", "--", url,
+            ], on_progress=progress, cancel=cancel)
+        if res.cancelled:
+            await info.edit_text("✕ Téléchargement annulé.")
+            return None, info
+        lines = [x.strip() for x in res.out.decode("utf-8", "replace").splitlines() if x.strip()]
+        found = next((Path(x) for x in reversed(lines) if Path(x).is_file()), None)
+        if not res.ok or found is None:
+            tried = f" ({res.attempts} proxies essayés)" if res.proxy else ""
+            await info.edit_text(f"✕ Échec du téléchargement{tried} : {ytdlp_hint(res.error or 'aucun fichier')}")
+            return None, info
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        final = dest_dir / found.name
+        if final.exists():
+            final = dest_dir / f"{found.stem}-{token}{found.suffix}"
+        shutil.move(str(found), final)
+        return final, info
+    finally:
+        DOWNLOADS.pop(token, None)
+        shutil.rmtree(work, ignore_errors=True)
+
+
+async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: str, category: str) -> None:
+    svc = svc_of(context)
+    path, info = await ytdlp_download(
+        context, chat_id, url, dest_dir=svc.settings.backgrounds_dir / category, label=f"dans « {category} »",
+        args=["-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
+              "--merge-output-format", "mp4"],
+    )
+    if path is None:
         return
-    dest_dir = svc.settings.backgrounds_dir / category
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    info = await context.bot.send_message(chat_id, f"Téléchargement dans « {category} »… Cela peut prendre quelques minutes.")
-    res = await run_ytdlp(svc.settings, [
-        "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
-        "--merge-output-format", "mp4", "--no-playlist", "--restrict-filenames",
-        "-o", str(dest_dir / "%(title).60s-%(id)s.%(ext)s"), "--print", "after_move:filepath",
-        "--quiet", "--no-warnings", "--", url,
-    ])
-    if not res.ok:
-        tried = f" ({res.attempts} proxies essayés)" if res.proxy else ""
-        await info.edit_text(f"✕ Échec du téléchargement{tried} : {ytdlp_hint(res.error)}")
-        return
-    out = res.out
-    path = Path(out.decode().strip().splitlines()[-1]) if out.strip() else None
-    dur = await svc.pipeline.bank.duration(path) if path and path.exists() else 0
-    await info.edit_text(f"✓ Ajoutée : {path.name if path else url}, {int(dur // 60)} min",
+    dur = await svc.pipeline.bank.duration(path)
+    await info.edit_text(f"✓ Ajoutée : {path.name}, {int(dur // 60)} min {int(dur % 60):02d} s",
                          reply_markup=kb([[("Banque vidéo", "bk")]]))
-    await db.log_event(f"Nouveau fond dans « {category} » : {path.name if path else url}")
+    await db.log_event(f"Nouveau fond dans « {category} » : {path.name}")
 
 
 # ---------------------------------------------------------------------------- plateformes (apps développeur)
@@ -1376,24 +1444,12 @@ async def receive_music(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def _download_music(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: str) -> None:
     svc = svc_of(context)
-    if not ytdlp_command():
-        await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : relance install.sh sur le serveur")
-        return
-    dest_dir = svc.settings.music_dir
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    info = await context.bot.send_message(chat_id, "Téléchargement de la piste… Cela peut prendre une minute.")
-    res = await run_ytdlp(svc.settings, [
-        "-f", "bestaudio/best", "-x", "--audio-format", "m4a", "--no-playlist", "--restrict-filenames",
-        "--max-filesize", "200M", "-o", str(dest_dir / "%(title).60s-%(id)s.%(ext)s"),
-        "--print", "after_move:filepath", "--quiet", "--no-warnings", "--", url,
-    ])
-    out = res.out
-    path = Path(out.decode().strip().splitlines()[-1]) if res.ok and out.strip() else None
-    if path is None or not path.exists():
-        tried = f" ({res.attempts} proxies essayés)" if res.proxy else ""
-        await info.edit_text(f"✕ Échec du téléchargement{tried} : {ytdlp_hint(res.error)}")
-        return
-    await _music_added(context, svc, path, info)
+    path, info = await ytdlp_download(
+        context, chat_id, url, dest_dir=svc.settings.music_dir, label="de la piste",
+        args=["-f", "bestaudio/best", "-x", "--audio-format", "m4a", "--max-filesize", "200M"],
+    )
+    if path is not None:
+        await _music_added(context, svc, path, info)
 
 
 # ---------------------------------------------------------------------------- erreurs

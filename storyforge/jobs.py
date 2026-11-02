@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import logging
 import time
@@ -37,6 +38,7 @@ class JobManager:
         self._workers: list[asyncio.Task] = []
         self._concurrency = {"generate": max(1, render_concurrency), "publish": max(1, publish_concurrency)}
         self._jobs: dict[int, Job] = {}
+        self._holds = 0  # activités hors file (téléchargements par lien) qu'une mise à jour ne doit pas couper
         self.completed = 0
         self.failed = 0
 
@@ -59,13 +61,24 @@ class JobManager:
         if not self.busy_file:
             return
         try:
-            if any(j.status == "running" for j in self._jobs.values()):
+            if self._holds or any(j.status == "running" for j in self._jobs.values()):
                 self.busy_file.parent.mkdir(parents=True, exist_ok=True)
                 self.busy_file.write_text(str(int(time.time())))
             else:
                 self.busy_file.unlink(missing_ok=True)
         except OSError:
             log.debug("Fichier d'activité inaccessible", exc_info=True)
+
+    @contextlib.contextmanager
+    def hold(self):
+        """Signale une activité longue (ex. téléchargement) : la mise à jour automatique attend sa fin."""
+        self._holds += 1
+        self._mark_busy()
+        try:
+            yield
+        finally:
+            self._holds -= 1
+            self._mark_busy()
 
     async def _heartbeat(self) -> None:
         while True:

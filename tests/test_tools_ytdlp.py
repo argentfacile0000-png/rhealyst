@@ -326,6 +326,7 @@ echo "$dir/fond-abc.mp4"
     assert (svc.settings.backgrounds_dir / "cooking" / "fond-abc.mp4").exists()
 
     # Nouvelle catégorie créée pour le lien
+    edits.clear()
     await type_text(ctx, "https://www.youtube.com/watch?v=def")
     await click(ctx, "lkn")
     await type_text(ctx, "Satisfying")
@@ -339,3 +340,84 @@ echo "$dir/fond-abc.mp4"
 
     await handlers.background(ctx, 42, boom())
     assert any("Erreur inattendue : disque plein" in e for e in edits)
+
+
+@needs_ffmpeg
+async def test_download_progress_cancel_and_stall(svc, tmp_path, monkeypatch):
+    import asyncio
+
+    src = svc.settings.backgrounds_dir / "cooking" / "long.mp4"
+    fake = tmp_path / "yt-dlp"
+    # Progression, puis fichier final. « slow » : reste muet (proxy mort). « hang » : très long (pour annuler).
+    fake.write_text(f"""#!/bin/sh
+dest=""; for a in "$@"; do [ "$prev" = "-o" ] && dest="$a"; prev="$a"; done
+dir=$(dirname "$dest"); mkdir -p "$dir"
+case "$*" in *http://slow:1*) echo "SFPROG   5.0%|1.00KiB/s|99:00|50.00MiB"; sleep 30; exit 1 ;; esac
+case "$*" in *hang*) echo "SFPROG  12.0%|1.00MiB/s|10:00|50.00MiB"; sleep 30; exit 1 ;; esac
+for p in 10.0 55.5 100.0; do echo "SFPROG  $p%|2.10MiB/s|00:05|50.00MiB"; sleep 0.1; done
+touch "$dir/partiel.f137.mp4.part"
+cp {src} "$dir/Fond_ASMR-xyz.mp4"
+echo "$dir/Fond_ASMR-xyz.mp4"
+""")
+    os.chmod(fake, 0o755)
+    monkeypatch.setattr(tools, "ytdlp_command", lambda: [str(fake)])
+    monkeypatch.setattr(handlers, "ytdlp_command", lambda: [str(fake)])
+    ctx, bot = make_ctx(svc)
+    edits = []
+
+    async def send_message(chat_id, text, **kw):
+        edits.append(text)
+
+        async def edit_text(t, **k):
+            edits.append(t)
+        return SimpleNamespace(edit_text=edit_text, message_id=1)
+
+    monkeypatch.setattr(bot, "send_message", send_message)
+    busy_seen = []
+
+    async def spy_progress_hold():
+        busy_seen.append(svc.jobs.busy_file.exists())
+
+    real_run = tools.run_ytdlp
+
+    async def run_spy(*a, **kw):
+        await spy_progress_hold()
+        return await real_run(*a, **kw)
+
+    monkeypatch.setattr(handlers, "run_ytdlp", run_spy)
+
+    # Progression affichée, fichier déplacé dans la banque, morceaux partiels jamais dans la banque
+    await handlers._download_bg(ctx, 42, "https://youtu.be/ok", "asmr")
+    assert busy_seen == [True] and not svc.jobs.busy_file.exists()  # mise à jour bloquée pendant le téléchargement
+    assert any("%" in e and "Téléchargement dans « asmr »" in e for e in edits)
+    assert any(e.startswith("✓ Ajoutée : Fond_ASMR-xyz.mp4") for e in edits)
+    bank = svc.settings.backgrounds_dir / "asmr"
+    assert sorted(p.name for p in bank.iterdir()) == ["Fond_ASMR-xyz.mp4"]
+    assert not list(svc.settings.work_dir.glob("dl-*"))
+
+    # Annulation : le bouton coupe yt-dlp tout de suite
+    edits.clear()
+    task = asyncio.create_task(handlers._download_bg(ctx, 42, "https://youtu.be/hang", "asmr"))
+    for _ in range(50):
+        await asyncio.sleep(0.05)
+        if handlers.DOWNLOADS:
+            break
+    token = next(iter(handlers.DOWNLOADS))
+    await click(ctx, f"dlx:{token}")
+    await asyncio.wait_for(task, timeout=5)
+    assert edits[-1] == "✕ Téléchargement annulé." and not handlers.DOWNLOADS
+
+    # Proxy muet : coupé faute de progression, le suivant prend le relais
+    await tools.set_proxy_list(["http://slow:1", "http://fast:2"])
+    res = await tools.run_ytdlp(svc.settings, ["-o", str(tmp_path / "x" / "%(title)s.%(ext)s"), "--", "u"],
+                                on_progress=lambda p: asyncio.sleep(0), stall=1)
+    assert res.ok and res.proxy == "http://fast:2" and res.attempts == 2
+    assert "http://slow:1" in (await tools.proxy_state())["bad"]
+
+
+def test_parse_progress_from_real_ytdlp_lines():
+    p = tools.parse_progress("SFPROG  45.3%|  3.88MiB/s|00:12|2.72MiBNA")
+    assert p == {"percent": 45.3, "speed": "3.88MiB/s", "eta": "00:12", "size": "2.72MiB"}
+    p = tools.parse_progress("SFPROG   0.0%|Unknown B/s|Unknown|N/A~ 512.00MiB")
+    assert p["speed"] == "" and p["eta"] == "" and p["size"] == "512.00MiB"
+    assert tools.parse_progress("[youtube] Extracting URL") is None
