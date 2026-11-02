@@ -615,7 +615,47 @@ async def bank(svc: Services) -> Screen:
     if summary:
         lines += ["", row("Total", hhmm(total))]
     lines.append(row("Ajout par lien", "disponible" if ytdlp_command() else "yt-dlp non installé"))
-    return "\n".join(lines), kb([[("Ajouter une vidéo", "bka"), ("Rescanner", "bk")], nav()])
+    return "\n".join(lines), kb([[("Ajouter une vidéo", "bka"), ("Rescanner", "bk")],
+                                 [("Téléchargement par lien", "yt")], nav()])
+
+
+async def ytdlp_settings(svc: Services) -> Screen:
+    from ..tools import PROXY_KEY, cookies_path, mask_proxy
+
+    cookies = cookies_path(svc.settings)
+    proxy = await db.kv_get(PROXY_KEY, "") or svc.settings.ytdlp_proxy
+    if cookies.is_file():
+        added = datetime.fromtimestamp(cookies.stat().st_mtime, timezone.utc).replace(tzinfo=None)
+        cookie_state = f"{CHECK} enregistrés, mis à jour le {to_local(added, tz(svc)):%d/%m %H:%M}"
+    else:
+        cookie_state = muted("aucun")
+    lines = [
+        title("Téléchargement par lien"),
+        muted("YouTube bloque souvent les serveurs (adresse de datacenter) : « Sign in to confirm you're not a bot ». "
+              "Deux solutions : les cookies d'une session YouTube connectée, ou un proxy."),
+        "",
+        row("yt-dlp", "installé" if ytdlp_command() else "non installé"),
+        f"Cookies YouTube  {cookie_state}",
+        f"Proxy  {esc(mask_proxy(proxy)) if proxy else muted('aucun')}",
+        "",
+        "<b>Cookies YouTube</b>",
+        "1. Sur ton ordinateur, ouvre une fenêtre de navigation privée et connecte-toi à YouTube, "
+        "de préférence avec un compte secondaire.",
+        "2. Avec l'extension <i>Get cookies.txt LOCALLY</i> (Chrome) ou <i>cookies.txt</i> (Firefox), "
+        "exporte les cookies de youtube.com.",
+        "3. Ferme la fenêtre privée (sinon YouTube renouvelle la session et le fichier expire), "
+        "puis envoie le fichier ici.",
+        muted("YouTube peut restreindre un compte qui télécharge beaucoup : évite ton compte principal."),
+        "",
+        "<b>Proxy</b>",
+        "Un proxy résidentiel (ou une connexion qui passe par chez toi) donne une adresse de particulier : "
+        "<code>http://utilisateur:motdepasse@hote:port</code> ou <code>socks5://hote:1080</code>.",
+    ]
+    rows = [[("Envoyer cookies.txt", "yta")] + ([("Retirer les cookies", "ytx")] if cookies.is_file() else []),
+            [("Proxy", "ytp")] + ([("Retirer le proxy", "ytpx")] if proxy else []),
+            [("Tester avec YouTube", "ytt")],
+            [("← Banque vidéo", "bk"), (HOME, "h")]]
+    return "\n".join(lines), kb(rows)
 
 
 async def music_bank(svc: Services) -> Screen:
