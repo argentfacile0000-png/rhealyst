@@ -116,6 +116,7 @@ async def test_ytdlp_settings_from_the_bot(svc, tmp_path, monkeypatch):
     fake.write_text("#!/bin/sh\necho 'Me at the zoo'\n")
     os.chmod(fake, 0o755)
     monkeypatch.setattr(handlers, "ytdlp_command", lambda: [str(fake)])
+    monkeypatch.setattr(tools, "ytdlp_command", lambda: [str(fake)])
     edits = []
 
     async def send_message(chat_id, text, **kw):
@@ -133,3 +134,111 @@ async def test_ytdlp_settings_from_the_bot(svc, tmp_path, monkeypatch):
     await click(ctx, "ytx")
     await click(ctx, "ytpx")
     assert not path.exists() and await tools.ytdlp_options(svc.settings) == tools.js_runtime_args()
+
+
+# ---------------------------------------------------------------- liste de proxies
+def test_parse_proxy_list_formats():
+    text = """# liste gratuite
+1.2.3.4:8080
+1.2.3.4:8080
+user:pass@5.6.7.8:3128
+9.9.9.9:1080:bob:secret
+socks5://10.0.0.1:1080
+n'importe quoi
+proxy.example.com:80 extra-colonne
+"""
+    assert tools.parse_proxy_list(text) == [
+        "http://1.2.3.4:8080", "http://user:pass@5.6.7.8:3128", "http://bob:secret@9.9.9.9:1080",
+        "socks5://10.0.0.1:1080", "http://proxy.example.com:80",
+    ]
+    assert tools.parse_proxy_list("1.2.3.4:1080", "socks5_proxies.txt") == ["socks5://1.2.3.4:1080"]
+    assert tools.parse_proxy_list("1.2.3.4:1080", "SOCKS4.TXT") == ["socks4://1.2.3.4:1080"]
+
+
+@needs_ffmpeg
+async def test_downloads_rotate_through_the_proxy_list(svc, tmp_path, monkeypatch):
+    log = tmp_path / "calls.log"
+    fake = tmp_path / "yt-dlp"
+    # Ne réussit qu'avec le proxy « good » ; « gone » simule une vidéo supprimée (inutile de réessayer)
+    fake.write_text(f"""#!/bin/sh
+echo "$@" >> {log}
+case "$*" in
+  *gone*) echo "ERROR: Video unavailable" >&2; exit 1 ;;
+  *http://good:8080*) echo "/tmp/ok.mp4"; exit 0 ;;
+  *) echo "ERROR: Sign in to confirm you're not a bot" >&2; exit 1 ;;
+esac
+""")
+    os.chmod(fake, 0o755)
+    monkeypatch.setattr(tools, "ytdlp_command", lambda: [str(fake)])
+    await tools.set_proxy_list(["http://bad1:8080", "http://bad2:8080", "http://good:8080"])
+
+    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/x"])
+    assert res.ok and res.proxy == "http://good:8080" and res.attempts == 3
+    assert "--socket-timeout" in log.read_text()
+    assert (await tools.proxy_rotation())[0] == "http://good:8080"  # les proxies en échec sont mis de côté
+    st = await tools.proxy_state()
+    assert set(st["bad"]) == {"http://bad1:8080", "http://bad2:8080"} and st["ok"] == ["http://good:8080"]
+
+    log.write_text("")
+    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/x"])
+    assert res.ok and res.attempts == 1  # le dernier proxy qui a marché passe en premier
+
+    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/gone"])
+    assert not res.ok and res.attempts == 1 and "unavailable" in res.error  # erreur définitive : pas de rotation
+
+    # Un proxy unique réglé est prioritaire sur la liste
+    from storyforge import db
+
+    await db.kv_set(tools.PROXY_KEY, "http://good:8080")
+    log.write_text("")
+    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/x"])
+    assert res.ok and res.proxy is None and log.read_text().count("--proxy") == 1
+
+
+@needs_ffmpeg
+async def test_proxy_list_from_the_bot(svc, monkeypatch):
+    import asyncio
+
+    ctx, bot = make_ctx(svc)
+    alive = {"socks5://1.1.1.1:1080", "socks5://3.3.3.3:1080"}
+
+    async def check(url, timeout=10.0):
+        return url in alive
+
+    monkeypatch.setattr(tools, "check_proxy_reaches_youtube", check)
+    await click(ctx, "ytl")
+    assert ctx.user_data["await"] == {"kind": "ytdlp_proxies"}
+    content = b"1.1.1.1:1080\n2.2.2.2:1080\n3.3.3.3:1080\n"
+
+    class TgFile:
+        async def download_as_bytearray(self):
+            return bytearray(content)
+
+    async def get_file():
+        return TgFile()
+
+    msg = FakeMessage("")
+    msg.document = SimpleNamespace(file_name="socks5.txt", file_size=len(content), get_file=get_file)
+    upd = SimpleNamespace(callback_query=None, effective_user=SimpleNamespace(id=42),
+                          effective_chat=SimpleNamespace(id=42), effective_message=msg)
+    await handlers.on_file(upd, ctx)
+    for _ in range(50):  # le test tourne en tâche de fond
+        await asyncio.sleep(0.02)
+        if (await tools.proxy_state())["tested_at"]:
+            break
+    st = await tools.proxy_state()
+    assert st["list"] == ["socks5://1.1.1.1:1080", "socks5://2.2.2.2:1080", "socks5://3.3.3.3:1080"]
+    assert st["ok"] == ["socks5://1.1.1.1:1080", "socks5://3.3.3.3:1080"]
+    assert await tools.proxy_rotation() == ["socks5://1.1.1.1:1080", "socks5://3.3.3.3:1080"]
+    assert any("3 proxies enregistrés" in t for t in bot.sent)
+    q = await click(ctx, "yt")
+    assert "3</b> adresses, 2 fonctionnelles" in q.edits[-1]
+
+    # Liste collée dans le message « Proxy »
+    await click(ctx, "ytp")
+    await type_text(ctx, "4.4.4.4:8080\n5.5.5.5:8080")
+    assert (await tools.proxy_state())["list"] == ["http://4.4.4.4:8080", "http://5.5.5.5:8080"]
+    await click(ctx, "ytlx")
+    for _ in range(20):  # le test lancé en fond se termine après le retrait
+        await asyncio.sleep(0.02)
+    assert (await tools.proxy_state())["list"] == []  # il ne remet pas l'ancienne liste

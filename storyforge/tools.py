@@ -121,3 +121,205 @@ async def ytdlp_options(settings: Settings) -> list[str]:
     if proxy:
         args += ["--proxy", proxy]
     return args
+
+
+# ---------------------------------------------------------------------- liste de proxies (rotation)
+PROXIES_KEY = "ytdlp_proxies"
+_LOCKS: dict[int, object] = {}  # verrou des modifications de la liste, un par boucle asyncio
+
+
+def _lock():
+    import asyncio
+
+    key = id(asyncio.get_running_loop())
+    lock = _LOCKS.get(key)
+    if lock is None:
+        _LOCKS.clear()
+        lock = _LOCKS[key] = asyncio.Lock()
+    return lock
+MAX_PROXIES = 1000
+MAX_ATTEMPTS = 6  # proxies essayés au plus pour un même téléchargement
+BAD_FOR = 3600  # un proxy en échec est mis de côté 1 h
+CHECK_URL = "https://www.youtube.com/generate_204"
+HOST_PORT = re.compile(r"[A-Za-z0-9.\-]+:\d{2,5}")
+NOT_RETRYABLE = ("unsupported url", "video unavailable", "private video", "file is larger", "is not a valid url",
+                 "this video has been removed")
+
+
+def normalize_proxy(token: str, default_scheme: str = "http") -> str | None:
+    """« ip:port », « user:pass@ip:port », « ip:port:user:pass » ou une adresse complète → adresse de proxy."""
+    token = token.strip()
+    if "://" in token:
+        return token if PROXY_RE.fullmatch(token) else None
+    if "@" in token:
+        creds, host = token.rsplit("@", 1)
+        return f"{default_scheme}://{creds}@{host}" if HOST_PORT.fullmatch(host) and ":" in creds else None
+    if HOST_PORT.fullmatch(token):
+        return f"{default_scheme}://{token}"
+    parts = token.split(":")
+    if len(parts) == 4 and HOST_PORT.fullmatch(f"{parts[0]}:{parts[1]}"):
+        return f"{default_scheme}://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}"
+    return None
+
+
+def parse_proxy_list(text: str, filename: str = "") -> list[str]:
+    """Une adresse par ligne. Le type par défaut vient du nom du fichier (socks5.txt, socks4.txt, sinon http)."""
+    name = filename.lower()
+    scheme = "socks5" if "socks5" in name else "socks4" if "socks4" in name else "http"
+    out: list[str] = []
+    for line in text.replace("\r", "\n").split("\n"):
+        line = line.strip()
+        if not line or line.startswith(("#", "//")):
+            continue
+        url = normalize_proxy(line.split()[0], scheme)
+        if url and url not in out:
+            out.append(url)
+        if len(out) >= MAX_PROXIES:
+            break
+    return out
+
+
+async def proxy_state() -> dict:
+    from . import db
+
+    data = await db.kv_get(PROXIES_KEY, {}) or {}
+    return {"list": list(data.get("list") or []), "ok": list(data.get("ok") or []),
+            "bad": dict(data.get("bad") or {}), "tested_at": data.get("tested_at")}
+
+
+async def _save_state(state: dict) -> None:
+    from . import db
+
+    await db.kv_set(PROXIES_KEY, state)
+
+
+async def set_proxy_list(urls: list[str]) -> None:
+    async with _lock():
+        await _save_state({"list": urls, "ok": [], "bad": {}, "tested_at": None})
+
+
+async def proxy_rotation() -> list[str]:
+    """Ordre d'essai : ceux qui ont marché d'abord, puis les autres, sans ceux mis de côté récemment."""
+    import time
+
+    st = await proxy_state()
+    now = time.time()
+    bad = {u for u, until in st["bad"].items() if until > now}
+    ordered = [u for u in st["ok"] if u in st["list"]] + [u for u in st["list"] if u not in st["ok"]]
+    return [u for u in ordered if u not in bad]
+
+
+async def mark_proxy(url: str, ok: bool) -> None:
+    import time
+
+    async with _lock():
+        st = await proxy_state()
+        if url not in st["list"]:
+            return
+        if ok:
+            st["ok"] = [url] + [u for u in st["ok"] if u != url]
+            st["bad"].pop(url, None)
+        else:
+            st["ok"] = [u for u in st["ok"] if u != url]
+            st["bad"][url] = time.time() + BAD_FOR
+        await _save_state(st)
+
+
+async def check_proxy_reaches_youtube(url: str, timeout: float = 10.0) -> bool:
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(proxy=url, timeout=timeout, follow_redirects=False) as client:
+            resp = await client.get(CHECK_URL)
+        return resp.status_code in (200, 204)
+    except Exception:
+        return False
+
+
+async def test_proxy_list(on_progress=None, concurrency: int = 64) -> tuple[int, int]:
+    """Teste toute la liste (YouTube joignable ?) et range les proxies fonctionnels en tête. Retourne (ok, total)."""
+    import asyncio
+    import time
+
+    st = await proxy_state()
+    urls = st["list"]
+    sem = asyncio.Semaphore(concurrency)
+    results: dict[str, bool] = {}
+    done = 0
+
+    async def one(u: str) -> None:
+        nonlocal done
+        async with sem:
+            results[u] = await check_proxy_reaches_youtube(u)
+        done += 1
+        if on_progress and done % 50 == 0:
+            await on_progress(done, len(urls))
+
+    await asyncio.gather(*(one(u) for u in urls))
+    ok = [u for u in urls if results.get(u)]
+    # La liste a pu changer pendant le test (remplacée, retirée) : on ne met à jour que ce qui est encore dedans.
+    now = time.time()
+    async with _lock():
+        current = await proxy_state()
+        keep = current["list"]
+        bad = {u: t for u, t in current["bad"].items() if u in keep and u not in results}
+        bad.update({u: now + BAD_FOR for u in keep if u in results and not results[u]})
+        await _save_state({
+            "list": keep,
+            "ok": [u for u in ok if u in keep] + [u for u in current["ok"] if u in keep and u not in results],
+            "bad": bad,
+            "tested_at": int(now) if keep else None,
+        })
+    return len(ok), len(urls)
+
+
+class YtdlpResult:
+    def __init__(self, returncode: int, out: bytes, err: bytes, proxy: str | None, attempts: int):
+        self.returncode, self.out, self.err, self.proxy, self.attempts = returncode, out, err, proxy, attempts
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+    @property
+    def error(self) -> str:
+        return self.err.decode("utf-8", "replace")
+
+
+async def run_ytdlp(settings: Settings, args: list[str], *, timeout: float = 3600) -> YtdlpResult:
+    """Lance yt-dlp ; avec une liste de proxies, passe au suivant tant que le téléchargement échoue."""
+    import asyncio
+
+    from . import db
+
+    exe = ytdlp_command()
+    if not exe:
+        return YtdlpResult(127, b"", "yt-dlp n'est pas installé : relance install.sh sur le serveur".encode(), None, 0)
+    base = await ytdlp_options(settings)
+    single = await db.kv_get(PROXY_KEY, "") or settings.ytdlp_proxy
+    candidates: list[str | None] = [None]
+    if not single:
+        rotation = await proxy_rotation()
+        if rotation:
+            candidates = list(rotation[:MAX_ATTEMPTS])
+    result = YtdlpResult(1, b"", b"", None, 0)
+    for attempt, proxy in enumerate(candidates, start=1):
+        extra = ["--proxy", proxy, "--socket-timeout", "20"] if proxy else []
+        proc = await asyncio.create_subprocess_exec(*exe, *base, *extra, *args,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            out, err = b"", "délai d'attente dépassé".encode()
+        code = proc.returncode if proc.returncode is not None else 1
+        result = YtdlpResult(code, out, err, proxy, attempt)
+        if result.ok:
+            if proxy:
+                await mark_proxy(proxy, True)
+            return result
+        if proxy:
+            await mark_proxy(proxy, False)
+        if any(s in result.error.lower() for s in NOT_RETRYABLE):
+            break
+    return result

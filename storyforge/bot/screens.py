@@ -620,9 +620,11 @@ async def bank(svc: Services) -> Screen:
 
 
 async def ytdlp_settings(svc: Services) -> Screen:
-    from ..tools import PROXY_KEY, cookies_path, mask_proxy
+    from ..tools import PROXY_KEY, cookies_path, mask_proxy, proxy_rotation, proxy_state
 
     cookies = cookies_path(svc.settings)
+    plist = await proxy_state()
+    usable = len(await proxy_rotation())
     proxy = await db.kv_get(PROXY_KEY, "") or svc.settings.ytdlp_proxy
     if cookies.is_file():
         added = datetime.fromtimestamp(cookies.stat().st_mtime, timezone.utc).replace(tzinfo=None)
@@ -637,6 +639,10 @@ async def ytdlp_settings(svc: Services) -> Screen:
         row("yt-dlp", "installé" if ytdlp_command() else "non installé"),
         f"Cookies YouTube  {cookie_state}",
         f"Proxy  {esc(mask_proxy(proxy)) if proxy else muted('aucun')}",
+        "Liste de proxies  " + (
+            (f"<b>{len(plist['list'])}</b> adresses, " + (f"{len(plist['ok'])} fonctionnelles au dernier test"
+                                                          if plist["tested_at"] else "pas encore testées")
+             + f", {usable} utilisables") if plist["list"] else muted("aucune")),
         "",
         "<b>Cookies YouTube</b>",
         "1. Sur ton ordinateur, ouvre une fenêtre de navigation privée et connecte-toi à YouTube, "
@@ -650,9 +656,18 @@ async def ytdlp_settings(svc: Services) -> Screen:
         "<b>Proxy</b>",
         "Un proxy résidentiel (ou une connexion qui passe par chez toi) donne une adresse de particulier : "
         "<code>http://utilisateur:motdepasse@hote:port</code> ou <code>socks5://hote:1080</code>.",
+        "",
+        "<b>Liste de proxies</b>",
+        "Envoie un fichier .txt (une adresse par ligne) : le bot teste chaque proxy, garde ceux qui joignent "
+        "YouTube et passe au suivant dès qu'un téléchargement échoue. Un proxy unique, s'il est réglé, est prioritaire.",
+        muted("Les proxies gratuits sont lents, meurent vite et beaucoup sont déjà bloqués par YouTube. "
+              "Le trafic reste chiffré (HTTPS), mais évite de les combiner avec tes cookies : YouTube n'aime pas "
+              "voir un compte se connecter depuis des dizaines d'adresses."),
     ]
     rows = [[("Envoyer cookies.txt", "yta")] + ([("Retirer les cookies", "ytx")] if cookies.is_file() else []),
             [("Proxy", "ytp")] + ([("Retirer le proxy", "ytpx")] if proxy else []),
+            [("Envoyer une liste (.txt)", "ytl")]
+            + ([("Retester la liste", "ytlt"), ("Retirer la liste", "ytlx")] if plist["list"] else []),
             [("Tester avec YouTube", "ytt")],
             [("← Banque vidéo", "bk"), (HOME, "h")]]
     return "\n".join(lines), kb(rows)

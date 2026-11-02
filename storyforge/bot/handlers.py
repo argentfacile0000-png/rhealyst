@@ -25,7 +25,7 @@ from .. import db
 from ..models import VideoFormat, VideoStatus
 from ..publishers import PublisherError
 from ..dates import parse_when
-from ..tools import ytdlp_command, ytdlp_hint, ytdlp_options
+from ..tools import run_ytdlp, ytdlp_command, ytdlp_hint
 from ..version import auto_update_flag
 from ..video.background import VIDEO_EXTS
 from . import screens
@@ -562,7 +562,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await _ask_bg(update, context, cats[idx])
     elif head in ("pfy", "pft", "pfi", "pfg", "pfk", "pfx", "pfv", "pfvx", "pftd"):
         await platform_action(update, context, head, parts)
-    elif head in ("yt", "yta", "ytx", "ytp", "ytpx", "ytt"):
+    elif head in ("yt", "yta", "ytx", "ytp", "ytpx", "ytt", "ytl", "ytlt", "ytlx"):
         await ytdlp_action(update, context, head)
     elif head in ("mua", "mut", "mup", "mud", "muD", "mue"):
         await music_action(update, context, head, parts)
@@ -761,6 +761,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await _ask_bg(update, context, cat)
         elif kind == "app_key":
             await receive_app_key(update, context, state, text)
+        elif kind == "ytdlp_proxies":
+            await save_proxy_list(update, context, text)
+        elif kind == "ytdlp_proxy" and len([x for x in text.splitlines() if x.strip()]) > 1:
+            await save_proxy_list(update, context, text)  # plusieurs adresses collées : c'est une liste
         elif kind == "ytdlp_proxy":
             from ..tools import PROXY_KEY, check_proxy
 
@@ -804,6 +808,17 @@ async def on_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if state.get("kind") == "google_json":
         await receive_google_client(update, context)
+        return
+    if state.get("kind") == "ytdlp_proxies":
+        doc = msg.document
+        if doc is None or (doc.file_size or 0) > 512 * 1024:
+            await msg.reply_html("Envoie un fichier .txt (512 Ko maximum).\n<i>/cancel pour annuler.</i>")
+            return
+        raw = bytes(await (await doc.get_file()).download_as_bytearray())
+        try:
+            await save_proxy_list(update, context, raw.decode("utf-8-sig", "replace"), doc.file_name or "")
+        except ValueError as exc:
+            await msg.reply_html(f"{esc(exc)}\n<i>Réessaie, ou /cancel pour annuler.</i>")
         return
     if state.get("kind") == "ytdlp_cookies":
         await receive_ytdlp_cookies(update, context)
@@ -860,25 +875,23 @@ def _cat_index(svc: Services, category: str) -> int:
 
 async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: str, category: str) -> None:
     svc = svc_of(context)
-    exe = ytdlp_command()
-    if not exe:
+    if not ytdlp_command():
         await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : relance install.sh sur le serveur")
         return
     dest_dir = svc.settings.backgrounds_dir / category
     dest_dir.mkdir(parents=True, exist_ok=True)
     info = await context.bot.send_message(chat_id, f"Téléchargement dans « {category} »… Cela peut prendre quelques minutes.")
-    proc = await asyncio.create_subprocess_exec(
-        *exe, *await ytdlp_options(svc.settings),
+    res = await run_ytdlp(svc.settings, [
         "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
         "--merge-output-format", "mp4", "--no-playlist", "--restrict-filenames",
         "-o", str(dest_dir / "%(title).60s-%(id)s.%(ext)s"), "--print", "after_move:filepath",
         "--quiet", "--no-warnings", "--", url,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    out, err = await proc.communicate()
-    if proc.returncode != 0:
-        await info.edit_text(f"✕ Échec du téléchargement : {ytdlp_hint(err.decode('utf-8', 'replace'))}")
+    ])
+    if not res.ok:
+        tried = f" ({res.attempts} proxies essayés)" if res.proxy else ""
+        await info.edit_text(f"✕ Échec du téléchargement{tried} : {ytdlp_hint(res.error)}")
         return
+    out = res.out
     path = Path(out.decode().strip().splitlines()[-1]) if out.strip() else None
     dur = await svc.pipeline.bank.duration(path) if path and path.exists() else 0
     await info.edit_text(f"✓ Ajoutée : {path.name if path else url}, {int(dur // 60)} min",
@@ -1018,7 +1031,7 @@ async def receive_google_client(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ---------------------------------------------------------------------------- téléchargement par lien (yt-dlp)
 async def ytdlp_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str) -> None:
-    from ..tools import PROXY_KEY, TEST_URL, cookies_path
+    from ..tools import PROXY_KEY, TEST_URL, cookies_path, mask_proxy, proxy_state, set_proxy_list
 
     svc = svc_of(context)
     q = update.callback_query
@@ -1050,23 +1063,82 @@ async def ytdlp_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head:
             return
         await q.answer("Test en cours…")
         info = await context.bot.send_message(update.effective_chat.id, "Test de téléchargement YouTube…")
-        proc = await asyncio.create_subprocess_exec(
-            *exe, *await ytdlp_options(svc.settings), "--simulate", "--no-playlist", "--print", "title",
-            "--quiet", "--no-warnings", "--", TEST_URL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            out, err = await asyncio.wait_for(proc.communicate(), timeout=90)
-        except asyncio.TimeoutError:
-            proc.kill()
-            out, err = b"", "délai d'attente dépassé".encode()
-        if proc.returncode == 0 and out.strip():
-            await info.edit_text(f"✓ YouTube répond : « {out.decode('utf-8', 'replace').strip()[:80]} ». "
+        res = await run_ytdlp(svc.settings, ["--simulate", "--no-playlist", "--print", "title", "--quiet",
+                                             "--no-warnings", "--", TEST_URL], timeout=90)
+        via = f" via {mask_proxy(res.proxy)}" if res.proxy else ""
+        if res.ok and res.out.strip():
+            await info.edit_text(f"✓ YouTube répond{via} : « {res.out.decode('utf-8', 'replace').strip()[:80]} ». "
                                  "Les ajouts par lien devraient fonctionner.")
         else:
-            await info.edit_text(f"✕ YouTube refuse encore : {ytdlp_hint(err.decode('utf-8', 'replace'))}")
+            tried = f" ({res.attempts} proxies essayés)" if res.proxy else ""
+            await info.edit_text(f"✕ YouTube refuse encore{tried} : {ytdlp_hint(res.error)}")
         return
+    elif head == "ytl":
+        await q.answer()
+        await prompt(update, context, "<b>Liste de proxies</b>\n\nEnvoie un fichier <i>.txt</i> avec une adresse par "
+                     "ligne : <code>ip:port</code>, <code>utilisateur:motdepasse@ip:port</code>, "
+                     "<code>ip:port:utilisateur:motdepasse</code> ou une adresse complète "
+                     "(<code>socks5://ip:port</code>). Un fichier nommé <i>socks5.txt</i> ou <i>socks4.txt</i> "
+                     "est lu comme des proxies SOCKS.\n\n<i>Tu peux aussi coller la liste dans un message.</i>",
+                     {"kind": "ytdlp_proxies"})
+        return
+    elif head == "ytlt":
+        st = await proxy_state()
+        if not st["list"]:
+            await q.answer("Aucune liste enregistrée", show_alert=True)
+            return
+        await q.answer("Test lancé")
+        asyncio.create_task(_test_proxy_list(context, update.effective_chat.id))
+        return
+    elif head == "ytlx":
+        await set_proxy_list([])
+        await db.log_event("Liste de proxies retirée")
+        await q.answer("Liste retirée")
     await show(update, context, await screens.ytdlp_settings(svc))
+
+
+async def save_proxy_list(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, filename: str = "") -> None:
+    from ..tools import parse_proxy_list, set_proxy_list
+
+    urls = parse_proxy_list(text, filename)
+    if not urls:
+        raise ValueError("Aucune adresse de proxy reconnue (une par ligne, ex. 1.2.3.4:8080)")
+    await set_proxy_list(urls)
+    context.user_data.pop("await", None)
+    await db.log_event(f"Liste de {len(urls)} proxies enregistrée")
+    await context.bot.send_message(update.effective_chat.id, f"✓ {len(urls)} proxies enregistrés. Test en cours : "
+                                   "je garde ceux qui joignent YouTube.")
+    asyncio.create_task(_test_proxy_list(context, update.effective_chat.id))
+
+
+async def _test_proxy_list(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:
+    from ..tools import test_proxy_list
+
+    svc = svc_of(context)
+    info = await context.bot.send_message(chat_id, "Test des proxies…")
+
+    async def progress(done: int, total: int) -> None:
+        try:
+            await info.edit_text(f"Test des proxies… {done}/{total}")
+        except TelegramError:
+            pass
+
+    ok, total = await test_proxy_list(progress)
+    text = (f"✓ {ok} proxies sur {total} joignent YouTube. Ils seront essayés à tour de rôle ; si l'un échoue, "
+            "le suivant prend le relais." if ok else
+            f"✕ Aucun des {total} proxies ne joint YouTube. Les proxies gratuits meurent vite : essaie une liste "
+            "plus récente.")
+    try:
+        await info.edit_text(text)
+    except TelegramError:
+        await context.bot.send_message(chat_id, text)
+    await show_in_chat(context, chat_id, await screens.ytdlp_settings(svc))
+
+
+async def show_in_chat(context: ContextTypes.DEFAULT_TYPE, chat_id: int, screen: screens.Screen) -> None:
+    text, markup = screen
+    await context.bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup,
+                                   link_preview_options=NO_PREVIEW)
 
 
 async def receive_ytdlp_cookies(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1239,23 +1311,22 @@ async def receive_music(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def _download_music(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: str) -> None:
     svc = svc_of(context)
-    exe = ytdlp_command()
-    if not exe:
+    if not ytdlp_command():
         await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : relance install.sh sur le serveur")
         return
     dest_dir = svc.settings.music_dir
     dest_dir.mkdir(parents=True, exist_ok=True)
     info = await context.bot.send_message(chat_id, "Téléchargement de la piste… Cela peut prendre une minute.")
-    proc = await asyncio.create_subprocess_exec(
-        *exe, *await ytdlp_options(svc.settings), "-f", "bestaudio/best", "-x", "--audio-format", "m4a", "--no-playlist", "--restrict-filenames",
+    res = await run_ytdlp(svc.settings, [
+        "-f", "bestaudio/best", "-x", "--audio-format", "m4a", "--no-playlist", "--restrict-filenames",
         "--max-filesize", "200M", "-o", str(dest_dir / "%(title).60s-%(id)s.%(ext)s"),
         "--print", "after_move:filepath", "--quiet", "--no-warnings", "--", url,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    out, err = await proc.communicate()
-    path = Path(out.decode().strip().splitlines()[-1]) if proc.returncode == 0 and out.strip() else None
+    ])
+    out = res.out
+    path = Path(out.decode().strip().splitlines()[-1]) if res.ok and out.strip() else None
     if path is None or not path.exists():
-        await info.edit_text(f"✕ Échec du téléchargement : {ytdlp_hint(err.decode('utf-8', 'replace'))}")
+        tried = f" ({res.attempts} proxies essayés)" if res.proxy else ""
+        await info.edit_text(f"✕ Échec du téléchargement{tried} : {ytdlp_hint(res.error)}")
         return
     await _music_added(context, svc, path, info)
 

@@ -84,7 +84,10 @@ vidéo est publiée avec une image automatique.
 - **Ajout par lien (YouTube…).** Depuis un serveur, YouTube refuse souvent les téléchargements (« Sign in to confirm
   you're not a bot ») : l'adresse IP est celle d'un datacenter. Banque vidéo → **Téléchargement par lien** : envoie
   le `cookies.txt` d'une session YouTube connectée (exporté depuis une fenêtre privée, idéalement avec un compte
-  secondaire) et/ou un proxy (`http://user:pass@hote:port`, `socks5://…`), puis **Tester avec YouTube**. Sinon,
+  secondaire), un proxy (`http://user:pass@hote:port`, `socks5://…`) ou une **liste de proxies** en `.txt`
+  (une adresse par ligne : `ip:port`, `user:pass@ip:port`, `ip:port:user:pass` ; un fichier `socks5.txt` est lu en
+  SOCKS5). Le bot teste la liste, garde les proxies qui joignent YouTube et passe au suivant dès qu'un
+  téléchargement échoue. Puis **Tester avec YouTube**. Sinon,
   télécharge la vidéo sur ton ordinateur et dépose-la dans `data/backgrounds/<catégorie>/`.
 - **Bande son.** Accueil → **Bande son** → Ajouter une piste : envoie un fichier audio (mp3, m4a, wav, ogg, flac),
   une vidéo dont on garde le son, ou un lien (YouTube, SoundCloud…). Chaque vidéo tire une piste au hasard et la
