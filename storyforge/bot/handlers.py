@@ -560,7 +560,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         await q.answer()
         await _ask_bg(update, context, cats[idx])
-    elif head in ("pfy", "pft", "pfi", "pfg", "pfk", "pfx"):
+    elif head in ("pfy", "pft", "pfi", "pfg", "pfk", "pfx", "pfv", "pfvx"):
         await platform_action(update, context, head, parts)
     elif head in ("mua", "mut", "mup", "mud", "muD", "mue"):
         await music_action(update, context, head, parts)
@@ -759,6 +759,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await _ask_bg(update, context, cat)
         elif kind == "app_key":
             await receive_app_key(update, context, state, text)
+        elif kind == "site_verify":
+            await publish_verification(update, context, None, text)
         elif kind == "google_json":
             raise ValueError("Envoie le fichier JSON lui-même (trombone, Fichier), pas son contenu")
         elif kind == "music_add":
@@ -787,6 +789,17 @@ async def on_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if state.get("kind") == "google_json":
         await receive_google_client(update, context)
+        return
+    if state.get("kind") == "site_verify":
+        doc = msg.document
+        if doc is None or (doc.file_size or 0) > 2048:
+            await msg.reply_html("Envoie le petit fichier .txt de vérification.\n<i>/cancel pour annuler.</i>")
+            return
+        raw = bytes(await (await doc.get_file()).download_as_bytearray())
+        try:
+            await publish_verification(update, context, doc.file_name, raw.decode("utf-8-sig", "replace"))
+        except ValueError as exc:
+            await msg.reply_html(f"{esc(exc)}\n<i>Réessaie, ou /cancel pour annuler.</i>")
         return
     if msg.audio or msg.voice:
         await msg.reply_html("Pour ajouter une bande son, passe par l'accueil, Bande son, puis Ajouter une piste.",
@@ -880,10 +893,39 @@ async def platform_action(update: Update, context: ContextTypes.DEFAULT_TYPE, he
         platform = parts[1]
         await prompt(update, context, f"<b>{PLATFORM[platform]}</b> · 1/2\n\nEnvoie {APP_STEPS[platform][0][1]}.",
                      {"kind": "app_key", "platform": platform, "values": {}})
+    elif head == "pfv":
+        await q.answer()
+        await prompt(update, context, "<b>Vérification du site TikTok</b>\n\nEnvoie le fichier de vérification "
+                     "téléchargé depuis TikTok (<i>tiktok….txt</i>), ou colle la ligne "
+                     "<code>tiktok-developers-site-verification=…</code>.", {"kind": "site_verify"})
+    elif head == "pfvx":
+        from ..platform_apps import clear_verifications
+
+        await clear_verifications()
+        await q.answer("Fichiers retirés")
+        await show(update, context, await screens.platform_guide(svc, "tiktok"))
     elif head == "pfx" and len(parts) > 1 and parts[1] in PLATFORM:
         await svc.apps.clear(parts[1])
         await q.answer("Identifiants retirés")
         await show(update, context, await screens.platform_guide(svc, parts[1]))
+
+
+async def publish_verification(update: Update, context: ContextTypes.DEFAULT_TYPE, filename: str | None,
+                               content: str) -> None:
+    from ..platform_apps import add_verification, parse_verification
+
+    svc = svc_of(context)
+    name, value = parse_verification(filename, content)
+    await add_verification(name, value)
+    context.user_data.pop("await", None)
+    url = f"{svc.settings.public_base}/{name}"
+    await context.bot.send_message(
+        update.effective_chat.id,
+        f"✓ Fichier publié : <code>{esc(url)}</code>\n\nDans TikTok, méthode <b>URL prefix</b> avec "
+        f"<code>{esc(svc.settings.public_base)}/</code>, puis clique <i>Verify</i>.",
+        parse_mode=ParseMode.HTML, link_preview_options=NO_PREVIEW,
+    )
+    await show(update, context, await screens.platform_guide(svc, "tiktok"), new=True)
 
 
 async def receive_app_key(update: Update, context: ContextTypes.DEFAULT_TYPE, state: dict, text: str) -> None:

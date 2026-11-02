@@ -369,6 +369,19 @@ def create_app(svc: Services) -> FastAPI:
             portal_url=portal_url(res.portal), telegram_url=tg_url(),
         )
 
+    # Fichier de vérification du site (TikTok, méthode « URL prefix ») publié depuis le bot.
+    # Déclarée en dernier : ne masque aucune autre route.
+    @app.get("/{filename}")
+    async def site_verification(filename: str) -> PlainTextResponse:
+        from ..platform_apps import VERIFY_NAME, verifications
+
+        if not VERIFY_NAME.fullmatch(filename):
+            raise HTTPException(404)
+        content = (await verifications()).get(filename)
+        if content is None:
+            raise HTTPException(404)
+        return PlainTextResponse(content, headers={"Cache-Control": "no-store"})
+
     return app
 
 

@@ -761,7 +761,10 @@ def _code(value: str) -> str:
 
 
 async def platform_guide(svc: Services, platform: str) -> Screen:
+    from ..platform_apps import verifications
+
     base = svc.settings.public_base or "https://ton-serveur"
+    published = list(await verifications()) if platform == "tiktok" else []
     state = _app_state(svc, platform)
     if platform == "youtube":
         lines = [
@@ -793,10 +796,18 @@ async def platform_guide(svc: Services, platform: str) -> Screen:
             "4. Copie le <b>Client key</b> et le <b>Client secret</b>, puis appuie sur <b>Saisir les clés</b>.",
             "5. Envoie l'app en revue (<i>Submit for review</i>).",
             "",
+            "<b>Vérification du site</b>, si TikTok la demande : choisis <b>URL prefix</b> (pas <i>Domain</i> : "
+            "l'adresse sslip.io n'accepte pas d'enregistrement DNS), saisis "
+            f"{_code(base + '/')}, télécharge le fichier de vérification, puis appuie sur "
+            "<b>Fichier de vérification</b> et envoie-le ici. Clique ensuite <i>Verify</i> dans TikTok.",
+            *([muted("Publiés : " + ", ".join(f"/{n}" for n in published))] if published else []),
+            "",
             muted("Tant que TikTok n'a pas audité l'app, les vidéos ne peuvent être publiées qu'en privé (Moi seul). "
                   "En attendant, règle le mode TikTok de la chaîne sur Brouillon : tu finalises dans l'app."),
         ]
-        rows = [[("Saisir les clés", "pfk:tiktok")]]
+        rows = [[("Saisir les clés", "pfk:tiktok"), ("Fichier de vérification", "pfv")]]
+        if published:
+            rows.append([("Retirer les fichiers de vérification", "pfvx")])
     else:
         lines = [
             title("Instagram", "Meta for Developers"), "", f"État  {state}", "",

@@ -257,3 +257,48 @@ async def test_legal_pages_and_portal_hint(public):
     ch = await svc.create_channel("Portail")
     page = client.get(f"/connect/{svc.portal_token(ch.id)}").text
     assert "README" not in page and "Plateformes" in page
+
+
+async def test_tiktok_site_verification_file(public):
+    svc = public
+    client = TestClient(create_app(svc))
+    ctx, bot = make_ctx(svc)
+    assert client.get("/tiktokABCDEFGH123.txt").status_code == 404
+    q = await click(ctx, "pft")
+    assert "URL prefix" in q.edits[-1] and f"{PUBLIC}/" in q.edits[-1]
+
+    # Ligne collée
+    await click(ctx, "pfv")
+    assert ctx.user_data["await"] == {"kind": "site_verify"}
+    m = await type_text(ctx, "n'importe quoi")
+    assert "tiktok-developers-site-verification" in m.replies[-1]
+    await type_text(ctx, "tiktok-developers-site-verification=w7xkJEb6zkxmy4VKVPxjDYBcpfgDPL44")
+    r = client.get("/tiktokw7xkJEb6zkxmy4VKVPxjDYBcpfgDPL44.txt")
+    assert r.status_code == 200 and r.text == "tiktok-developers-site-verification=w7xkJEb6zkxmy4VKVPxjDYBcpfgDPL44"
+    assert r.headers["content-type"].startswith("text/plain")
+    assert any(f"{PUBLIC}/tiktokw7xk" in t for t in bot.sent)
+
+    # Fichier envoyé tel quel (nom et contenu conservés)
+    await click(ctx, "pfv")
+
+    class TgFile:
+        async def download_as_bytearray(self):
+            return bytearray(b"tiktok-developers-site-verification=Zz9yXw8vU7tS6rQ5\n")
+
+    async def get_file():
+        return TgFile()
+
+    msg = FakeMessage("")
+    msg.document = SimpleNamespace(file_name="tiktokZz9yXw8vU7tS6rQ5.txt", file_size=60, get_file=get_file)
+    upd = SimpleNamespace(callback_query=None, effective_user=SimpleNamespace(id=42),
+                          effective_chat=SimpleNamespace(id=42), effective_message=msg)
+    await handlers.on_file(upd, ctx)
+    assert client.get("/tiktokZz9yXw8vU7tS6rQ5.txt").text == "tiktok-developers-site-verification=Zz9yXw8vU7tS6rQ5"
+    q = await click(ctx, "pft")
+    assert "/tiktokZz9yXw8vU7tS6rQ5.txt" in q.edits[-1]
+
+    # Les autres routes ne sont pas masquées, rien d'autre n'est servi
+    assert client.get("/app").status_code == 200 and client.get("/healthz").json() == {"ok": True}
+    assert client.get("/storyforge.db").status_code == 404 and client.get("/..%2F.env").status_code == 404
+    await click(ctx, "pfvx")
+    assert client.get("/tiktokZz9yXw8vU7tS6rQ5.txt").status_code == 404

@@ -125,3 +125,49 @@ class PlatformApps:
                             "(Clients, ton client Web, URI de redirection autorisés).")
         await db.log_event("Client OAuth Google enregistré depuis le bot", "success")
         return warnings
+
+
+# ---------------------------------------------------------------------- vérification du site
+# TikTok (et d'autres) vérifient que tu contrôles l'adresse du serveur. Avec un domaine sslip.io, impossible
+# d'ajouter un enregistrement DNS : on choisit la méthode « URL prefix » et le serveur publie le fichier fourni.
+VERIFY_KEY = "site_verifications"
+VERIFY_NAME = re.compile(r"[A-Za-z0-9_\-]{3,100}\.txt")
+TIKTOK_LINE = re.compile(r"tiktok-developers-site-verification=([A-Za-z0-9_\-]{8,128})")
+MAX_VERIFICATIONS = 10
+
+
+def parse_verification(filename: str | None, content: str) -> tuple[str, str]:
+    """(nom du fichier publié, contenu) à partir d'un fichier envoyé ou de la ligne collée."""
+    content = content.strip()
+    if not content or len(content) > 512 or not re.fullmatch(r"[A-Za-z0-9_\-=.:]+", content):
+        raise ValueError("Contenu inattendu : un fichier de vérification tient sur une ligne, "
+                         "par exemple tiktok-developers-site-verification=…")
+    if filename:
+        name = Path(filename).name
+        if not VERIFY_NAME.fullmatch(name):
+            raise ValueError("Nom de fichier inattendu : envoie le fichier .txt téléchargé tel quel")
+        return name, content
+    m = TIKTOK_LINE.fullmatch(content)
+    if not m:
+        raise ValueError("Colle la ligne tiktok-developers-site-verification=…, ou envoie le fichier .txt")
+    return f"tiktok{m.group(1)}.txt", content
+
+
+async def verifications() -> dict[str, str]:
+    data = await db.kv_get(VERIFY_KEY, {}) or {}
+    return {k: v for k, v in data.items() if VERIFY_NAME.fullmatch(k) and isinstance(v, str)}
+
+
+async def add_verification(name: str, content: str) -> None:
+    data = await verifications()
+    data.pop(name, None)
+    data[name] = content
+    while len(data) > MAX_VERIFICATIONS:
+        data.pop(next(iter(data)))
+    await db.kv_set(VERIFY_KEY, data)
+    await db.log_event(f"Fichier de vérification publié : /{name}", "success")
+
+
+async def clear_verifications() -> None:
+    await db.kv_set(VERIFY_KEY, {})
+    await db.log_event("Fichiers de vérification retirés", "info")
