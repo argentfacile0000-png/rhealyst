@@ -615,8 +615,9 @@ async def bank(svc: Services) -> Screen:
     if summary:
         lines += ["", row("Total", hhmm(total))]
     lines.append(row("Ajout par lien", "disponible" if ytdlp_command() else "yt-dlp non installé"))
-    return "\n".join(lines), kb([[("Ajouter une vidéo", "bka"), ("Rescanner", "bk")],
-                                 [("Téléchargement par lien", "yt")], nav()])
+    lines += ["", muted("Astuce : envoie un lien à tout moment, le bot te propose où l'ajouter.")]
+    return "\n".join(lines), kb([[("Ajouter (fichier ou lien)", "bka"), ("Rescanner", "bk")],
+                                 [("Réglages YouTube (cookies, proxies)", "yt")], nav()])
 
 
 async def ytdlp_settings(svc: Services) -> Screen:
@@ -632,7 +633,8 @@ async def ytdlp_settings(svc: Services) -> Screen:
     else:
         cookie_state = muted("aucun")
     lines = [
-        title("Téléchargement par lien"),
+        title("Réglages YouTube"),
+        muted("Pour ajouter une vidéo : envoie simplement son lien au bot, ou Banque vidéo, Ajouter."),
         muted("YouTube bloque souvent les serveurs (adresse de datacenter) : « Sign in to confirm you're not a bot ». "
               "Deux solutions : les cookies d'une session YouTube connectée, ou un proxy."),
         "",
@@ -668,7 +670,7 @@ async def ytdlp_settings(svc: Services) -> Screen:
             [("Proxy", "ytp")] + ([("Retirer le proxy", "ytpx")] if proxy else []),
             [("Envoyer une liste (.txt)", "ytl")]
             + ([("Retester la liste", "ytlt"), ("Retirer la liste", "ytlx")] if plist["list"] else []),
-            [("Tester avec YouTube", "ytt")],
+            [("Tester avec YouTube", "ytt"), ("Ajouter une vidéo", "bka")],
             [("← Banque vidéo", "bk"), (HOME, "h")]]
     return "\n".join(lines), kb(rows)
 

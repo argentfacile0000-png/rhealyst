@@ -566,6 +566,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await ytdlp_action(update, context, head)
     elif head in ("mua", "mut", "mup", "mud", "muD", "mue"):
         await music_action(update, context, head, parts)
+    elif head in ("lkc", "lkn", "lkm"):
+        await link_destination(update, context, head, parts)
     elif head == "bkn":
         await q.answer()
         await prompt(update, context, "<b>Nouvelle catégorie</b>\n\nQuel nom ?\n<i>Exemples : cooking, minecraft, satisfying</i>",
@@ -691,6 +693,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if state is None:
         if "code=" in text and "state=" in text:
             state = {"kind": "oauth"}
+        elif re.fullmatch(r"https?://\S+", text):
+            await offer_link(update, context, text)  # un lien envoyé à tout moment : où l'ajouter ?
+            return
         else:
             await msg.reply_html("Tout se pilote depuis le dashboard.", reply_markup=kb([[("Ouvrir le dashboard", "h")]]))
             return
@@ -758,7 +763,12 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not cat:
                 raise ValueError("Nom invalide")
             (svc.settings.backgrounds_dir / cat).mkdir(parents=True, exist_ok=True)
-            await _ask_bg(update, context, cat)
+            if state.get("link"):  # catégorie créée pour un lien déjà envoyé
+                context.user_data.pop("await", None)
+                background(context, update.effective_chat.id,
+                           _download_bg(context, update.effective_chat.id, state["link"], cat))
+            else:
+                await _ask_bg(update, context, cat)
         elif kind == "app_key":
             await receive_app_key(update, context, state, text)
         elif kind == "ytdlp_proxies":
@@ -786,12 +796,13 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             if not re.match(r"https?://", text):
                 raise ValueError("Envoie un fichier audio ou un lien http(s)")
             context.user_data.pop("await", None)
-            asyncio.create_task(_download_music(context, update.effective_chat.id, text))
+            background(context, update.effective_chat.id, _download_music(context, update.effective_chat.id, text))
         elif kind == "bg_add":
             if not re.match(r"https?://", text):
                 raise ValueError("Envoie une vidéo ou un lien http(s)")
             context.user_data.pop("await", None)
-            asyncio.create_task(_download_bg(context, update.effective_chat.id, text, state["category"]))
+            background(context, update.effective_chat.id,
+                       _download_bg(context, update.effective_chat.id, text, state["category"]))
         else:
             context.user_data.pop("await", None)
     except (ValueError, PublisherError) as exc:
@@ -866,6 +877,60 @@ async def on_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     dur = await svc.pipeline.bank.duration(dest)
     await info.edit_text(f"✓ Ajoutée à « {state['category']} », {int(dur // 60)}:{int(dur % 60):02d}",
                          reply_markup=kb([[("Banque vidéo", "bk"), ("En ajouter une autre", f"bkc:{_cat_index(svc, state['category'])}")]]))
+
+
+def background(context: ContextTypes.DEFAULT_TYPE, chat_id: int, coro) -> asyncio.Task:
+    """Tâche de fond (téléchargement, test…) : une erreur inattendue est signalée au lieu de disparaître."""
+    async def runner() -> None:
+        try:
+            await coro
+        except Exception as exc:
+            log.exception("Tâche de fond échouée")
+            try:
+                await context.bot.send_message(chat_id, f"✕ Erreur inattendue : {exc}"[:400])
+            except TelegramError:
+                pass
+
+    return asyncio.create_task(runner())
+
+
+async def offer_link(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str) -> None:
+    """Lien reçu hors de tout formulaire : on propose de l'ajouter à la banque vidéo ou à la bande son."""
+    svc = svc_of(context)
+    context.user_data["pending_link"] = url
+    cats = sorted(svc.pipeline.bank.categories().keys())
+    rows = [[(f"Fond · {c}", f"lkc:{i}")] for i, c in enumerate(cats[:12])]
+    rows.append([("Fond · nouvelle catégorie", "lkn")])
+    rows.append([("Bande son (musique)", "lkm")])
+    rows.append(CANCEL)
+    await update.effective_message.reply_html(
+        "<b>Que faire de ce lien ?</b>\n\nAjoute-le à la <b>banque vidéo</b> (choisis la catégorie) "
+        "ou à la <b>bande son</b>.", reply_markup=kb(rows), link_preview_options=NO_PREVIEW)
+
+
+async def link_destination(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str, parts: list[str]) -> None:
+    svc = svc_of(context)
+    q = update.callback_query
+    url = context.user_data.pop("pending_link", None)
+    chat_id = update.effective_chat.id
+    if not url:
+        await q.answer("Renvoie le lien", show_alert=True)
+        return
+    if head == "lkm":
+        await q.answer("Téléchargement de la piste")
+        background(context, chat_id, _download_music(context, chat_id, url))
+    elif head == "lkn":
+        await q.answer()
+        await prompt(update, context, "<b>Nouvelle catégorie</b>\n\nQuel nom ?\n<i>Exemples : cooking, minecraft, "
+                     "satisfying</i>", {"kind": "bg_newcat", "link": url})
+    else:
+        cats = sorted(svc.pipeline.bank.categories().keys())
+        idx = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else -1
+        if not 0 <= idx < len(cats):
+            await q.answer("Catégorie introuvable", show_alert=True)
+            return
+        await q.answer(f"Téléchargement dans {cats[idx]}")
+        background(context, chat_id, _download_bg(context, chat_id, url, cats[idx]))
 
 
 def _cat_index(svc: Services, category: str) -> int:
@@ -1088,7 +1153,7 @@ async def ytdlp_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head:
             await q.answer("Aucune liste enregistrée", show_alert=True)
             return
         await q.answer("Test lancé")
-        asyncio.create_task(_test_proxy_list(context, update.effective_chat.id))
+        background(context, update.effective_chat.id, _test_proxy_list(context, update.effective_chat.id))
         return
     elif head == "ytlx":
         await set_proxy_list([])
@@ -1108,7 +1173,7 @@ async def save_proxy_list(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     await db.log_event(f"Liste de {len(urls)} proxies enregistrée")
     await context.bot.send_message(update.effective_chat.id, f"✓ {len(urls)} proxies enregistrés. Test en cours : "
                                    "je garde ceux qui joignent YouTube.")
-    asyncio.create_task(_test_proxy_list(context, update.effective_chat.id))
+    background(context, update.effective_chat.id, _test_proxy_list(context, update.effective_chat.id))
 
 
 async def _test_proxy_list(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> None:

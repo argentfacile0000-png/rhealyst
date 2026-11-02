@@ -81,8 +81,9 @@ vidéo est publiée avec une image automatique.
 - **Programmer.** Publie une vidéo à une date précise : « demain 18h », « vendredi 21h », « 25/12 18:30 »,
   « dans 2h »… ou un bouton rapide (ce soir 20:00, demain 12:00…). La date suit le fuseau de la chaîne ;
   les programmations sont conservées après un redémarrage et rattrapées si l'heure est passée entre-temps.
-- **Ajout par lien (YouTube…).** Depuis un serveur, YouTube refuse souvent les téléchargements (« Sign in to confirm
-  you're not a bot ») : l'adresse IP est celle d'un datacenter. Banque vidéo → **Téléchargement par lien** : envoie
+- **Ajout par lien (YouTube…).** Envoie un lien au bot à tout moment : il propose de l'ajouter à la banque vidéo
+  (choix de la catégorie) ou à la bande son. Depuis un serveur, YouTube refuse souvent les téléchargements (« Sign in to confirm
+  you're not a bot ») : l'adresse IP est celle d'un datacenter. Banque vidéo → **Réglages YouTube** : envoie
   le `cookies.txt` d'une session YouTube connectée (exporté depuis une fenêtre privée, idéalement avec un compte
   secondaire), un proxy (`http://user:pass@hote:port`, `socks5://…`) ou une **liste de proxies** en `.txt`
   (une adresse par ligne : `ip:port`, `user:pass@ip:port`, `ip:port:user:pass` ; un fichier `socks5.txt` est lu en

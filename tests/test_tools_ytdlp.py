@@ -80,7 +80,7 @@ async def test_ytdlp_settings_from_the_bot(svc, tmp_path, monkeypatch):
     svc.settings.google_client_secrets_file = tmp_path / "secrets" / "google_client_secret.json"
     ctx, bot = make_ctx(svc)
     q = await click(ctx, "yt")
-    assert "Téléchargement par lien" in q.edits[-1] and "cookies" in q.edits[-1].lower()
+    assert "Réglages YouTube" in q.edits[-1] and "cookies" in q.edits[-1].lower()
     assert await tools.ytdlp_options(svc.settings) == tools.js_runtime_args()
 
     # Cookies envoyés en fichier
@@ -280,3 +280,62 @@ async def test_proxy_test_never_hangs(svc, monkeypatch):
     start = time.monotonic()
     ok, total = await tools.test_proxy_list(None, per_proxy=30, deadline=0.5)
     assert time.monotonic() - start < 3 and ok == 0
+
+
+@needs_ffmpeg
+async def test_link_sent_anytime_goes_to_the_bank(svc, tmp_path, monkeypatch):
+    import asyncio
+
+    fake = tmp_path / "yt-dlp"
+    # yt-dlp factice : copie un fond existant à l'endroit demandé (-o) et affiche le chemin
+    fake.write_text(f"""#!/bin/sh
+dest=""
+while [ $# -gt 0 ]; do [ "$1" = "-o" ] && dest="$2"; shift; done
+dir=$(dirname "$dest"); mkdir -p "$dir"
+cp {svc.settings.backgrounds_dir}/cooking/long.mp4 "$dir/fond-abc.mp4"
+echo "$dir/fond-abc.mp4"
+""")
+    os.chmod(fake, 0o755)
+    monkeypatch.setattr(tools, "ytdlp_command", lambda: [str(fake)])
+    monkeypatch.setattr(handlers, "ytdlp_command", lambda: [str(fake)])
+    ctx, bot = make_ctx(svc)
+    edits = []
+
+    async def send_message(chat_id, text, **kw):
+        edits.append(text)
+
+        async def edit_text(t, **k):
+            edits.append(t)
+        return SimpleNamespace(edit_text=edit_text, message_id=1)
+
+    monkeypatch.setattr(bot, "send_message", send_message)
+
+    async def wait_for(text):
+        for _ in range(100):
+            if any(text in e for e in edits):
+                return True
+            await asyncio.sleep(0.05)
+        return False
+
+    # Lien envoyé sans passer par un menu (même après l'écran des réglages YouTube)
+    await click(ctx, "yt")
+    m = await type_text(ctx, "https://www.youtube.com/watch?v=abc")
+    assert "Que faire de ce lien" in m.replies[-1]
+    await click(ctx, "lkc:0")  # cooking
+    assert await wait_for("✓ Ajoutée : fond-abc.mp4")
+    assert (svc.settings.backgrounds_dir / "cooking" / "fond-abc.mp4").exists()
+
+    # Nouvelle catégorie créée pour le lien
+    await type_text(ctx, "https://www.youtube.com/watch?v=def")
+    await click(ctx, "lkn")
+    await type_text(ctx, "Satisfying")
+    assert await wait_for("Téléchargement dans « satisfying »")
+    assert await wait_for("✓ Ajoutée")
+    assert (svc.settings.backgrounds_dir / "satisfying" / "fond-abc.mp4").exists()
+
+    # Une erreur inattendue dans une tâche de fond est signalée
+    async def boom():
+        raise RuntimeError("disque plein")
+
+    await handlers.background(ctx, 42, boom())
+    assert any("Erreur inattendue : disque plein" in e for e in edits)
