@@ -89,7 +89,7 @@ async def test_full_connection_flow(portal_svc, monkeypatch):
     tt = urlparse(r.headers["location"])
     tq = parse_qs(tt.query)
     assert tt.netloc == "www.tiktok.com" and tq["redirect_uri"] == [f"{PUBLIC}/oauth/tiktok"]
-    assert "video.publish" in tq["scope"][0]
+    assert tq["scope"] == ["user.info.basic,video.upload"]  # brouillons par défaut (revue TikTok)
 
     async def fake_tt_exchange(key, secret, redirect, code):
         return {"access_token": "a", "refresh_token": "b", "expires_at": time.time() + 86400}
