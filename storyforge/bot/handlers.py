@@ -434,7 +434,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     simple = {
         "h": screens.home, "cl": screens.channel_list, "gen": screens.generate_picker, "q": screens.queue,
         "st": screens.stats, "bk": screens.bank, "set": screens.settings_screen, "ev": screens.events,
-        "bka": screens.bank_categories,
+        "bka": screens.bank_categories, "mu": screens.music_bank, "pf": screens.platforms,
     }
     if head in simple:
         await q.answer()
@@ -560,6 +560,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         await q.answer()
         await _ask_bg(update, context, cats[idx])
+    elif head in ("pfy", "pft", "pfi", "pfg", "pfk", "pfx"):
+        await platform_action(update, context, head, parts)
+    elif head in ("mua", "mut", "mup", "mud", "muD", "mue"):
+        await music_action(update, context, head, parts)
     elif head == "bkn":
         await q.answer()
         await prompt(update, context, "<b>Nouvelle catégorie</b>\n\nQuel nom ?\n<i>Exemples : cooking, minecraft, satisfying</i>",
@@ -640,8 +644,9 @@ async def on_multi(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: int,
     svc = svc_of(context)
     q = update.callback_query
     ch = await svc.get_channel(cid)
-    if key == "bg_categories":
-        opts = sorted(svc.pipeline.bank.categories().keys())
+    if key in ("bg_categories", "music_tracks"):
+        opts = (sorted(svc.pipeline.bank.categories().keys()) if key == "bg_categories"
+                else svc.pipeline.music.names())
         if idx >= len(opts):
             await q.answer()
             return
@@ -752,6 +757,15 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 raise ValueError("Nom invalide")
             (svc.settings.backgrounds_dir / cat).mkdir(parents=True, exist_ok=True)
             await _ask_bg(update, context, cat)
+        elif kind == "app_key":
+            await receive_app_key(update, context, state, text)
+        elif kind == "google_json":
+            raise ValueError("Envoie le fichier JSON lui-même (trombone, Fichier), pas son contenu")
+        elif kind == "music_add":
+            if not re.match(r"https?://", text):
+                raise ValueError("Envoie un fichier audio ou un lien http(s)")
+            context.user_data.pop("await", None)
+            asyncio.create_task(_download_music(context, update.effective_chat.id, text))
         elif kind == "bg_add":
             if not re.match(r"https?://", text):
                 raise ValueError("Envoie une vidéo ou un lien http(s)")
@@ -768,6 +782,16 @@ async def on_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     state = context.user_data.get("await") or {}
     msg = update.effective_message
+    if state.get("kind") == "music_add":
+        await receive_music(update, context)
+        return
+    if state.get("kind") == "google_json":
+        await receive_google_client(update, context)
+        return
+    if msg.audio or msg.voice:
+        await msg.reply_html("Pour ajouter une bande son, passe par l'accueil, Bande son, puis Ajouter une piste.",
+                             reply_markup=kb([[("Bande son", "mu")]]))
+        return
     if state.get("kind") != "bg_add":
         await msg.reply_html("Pour ajouter un fond, passe par Banque vidéo, puis Ajouter une vidéo.",
                              reply_markup=kb([[("Banque vidéo", "bk")]]))
@@ -830,6 +854,266 @@ async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: st
     await db.log_event(f"Nouveau fond dans « {category} » : {path.name if path else url}")
 
 
+# ---------------------------------------------------------------------------- plateformes (apps développeur)
+APP_STEPS = {
+    "tiktok": [("tiktok_client_key", "le <b>Client key</b>"), ("tiktok_client_secret", "le <b>Client secret</b>")],
+    "instagram": [("instagram_app_id", "l'<b>ID de l'app Instagram</b>"),
+                  ("instagram_app_secret", "la <b>clé secrète de l'app Instagram</b>")],
+}
+
+
+async def platform_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str, parts: list[str]) -> None:
+    svc = svc_of(context)
+    q = update.callback_query
+    if head in ("pfy", "pft", "pfi"):
+        await q.answer()
+        platform = {"pfy": "youtube", "pft": "tiktok", "pfi": "instagram"}[head]
+        await show(update, context, await screens.platform_guide(svc, platform))
+    elif head == "pfg":
+        await q.answer()
+        await prompt(update, context, "<b>Client OAuth Google</b>\n\nEnvoie le fichier JSON téléchargé depuis Google "
+                     "Cloud (<i>client_secret_….json</i>), avec le trombone, Fichier.\n\n"
+                     "<i>Le message est supprimé après lecture : le fichier reste uniquement sur ton serveur.</i>",
+                     {"kind": "google_json"})
+    elif head == "pfk" and len(parts) > 1 and parts[1] in APP_STEPS:
+        await q.answer()
+        platform = parts[1]
+        await prompt(update, context, f"<b>{PLATFORM[platform]}</b> · 1/2\n\nEnvoie {APP_STEPS[platform][0][1]}.",
+                     {"kind": "app_key", "platform": platform, "values": {}})
+    elif head == "pfx" and len(parts) > 1 and parts[1] in PLATFORM:
+        await svc.apps.clear(parts[1])
+        await q.answer("Identifiants retirés")
+        await show(update, context, await screens.platform_guide(svc, parts[1]))
+
+
+async def receive_app_key(update: Update, context: ContextTypes.DEFAULT_TYPE, state: dict, text: str) -> None:
+    from ..platform_apps import check_value
+    from ..publishers import tiktok
+
+    svc = svc_of(context)
+    msg = update.effective_message
+    try:  # une clé ne reste pas dans la conversation
+        await msg.delete()
+    except (TelegramError, AttributeError):
+        pass
+    platform = state["platform"]
+    steps = APP_STEPS[platform]
+    values = dict(state.get("values") or {})
+    key, _ = steps[len(values)]
+    values[key] = check_value(key, text)
+    if len(values) < len(steps):
+        state["values"] = values
+        context.user_data["await"] = state
+        await context.bot.send_message(update.effective_chat.id,
+                                       f"{PLATFORM[platform]} · 2/2\n\nEnvoie {steps[len(values)][1]}.",
+                                       parse_mode=ParseMode.HTML, reply_markup=kb([CANCEL]))
+        return
+    note = ""
+    if platform == "tiktok":
+        try:
+            ok = await tiktok.check_client(values["tiktok_client_key"], values["tiktok_client_secret"])
+        except PublisherError as exc:
+            context.user_data["await"] = {"kind": "app_key", "platform": platform, "values": {}}
+            raise ValueError(f"{exc}. Vérifie les deux valeurs et recommence : envoie le Client key") from exc
+        note = "" if ok else "\n<i>TikTok n'a pas pu être joint pour vérifier les clés : elles sont enregistrées quand même.</i>"
+    await svc.apps.set(platform, values)
+    context.user_data.pop("await", None)
+    await context.bot.send_message(update.effective_chat.id,
+                                   f"✓ App {PLATFORM[platform]} enregistrée. Connecte maintenant ton compte : "
+                                   f"Chaîne, puis Comptes.{note}", parse_mode=ParseMode.HTML)
+    await show(update, context, await screens.platform_guide(svc, platform), new=True)
+
+
+async def receive_google_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    svc = svc_of(context)
+    msg = update.effective_message
+    doc = msg.document
+    if doc is None or (doc.file_size or 0) > 64 * 1024:
+        await msg.reply_html("Envoie le fichier JSON du client OAuth (quelques Ko).\n<i>/cancel pour annuler.</i>")
+        return
+    raw = bytes(await (await doc.get_file()).download_as_bytearray())
+    try:
+        await msg.delete()
+    except TelegramError:
+        pass
+    redirect = f"{svc.settings.public_base}/oauth/youtube" if svc.portal_available() else ""
+    try:
+        warnings = await svc.apps.save_google(raw, redirect)
+    except ValueError as exc:
+        await context.bot.send_message(update.effective_chat.id, f"✕ {exc}\n\nRenvoie le bon fichier, ou /cancel.")
+        return
+    context.user_data.pop("await", None)
+    extra = "".join(f"\n\n<i>{esc(w)}</i>" for w in warnings)
+    await context.bot.send_message(update.effective_chat.id,
+                                   "✓ Client OAuth Google enregistré. Connecte maintenant ta chaîne YouTube : "
+                                   f"Chaîne, puis Comptes.{extra}", parse_mode=ParseMode.HTML)
+    await show(update, context, await screens.platform_guide(svc, "youtube"), new=True)
+
+
+# ---------------------------------------------------------------------------- bande son
+MUSIC_PROMPT = (
+    "<b>Ajouter une piste</b>\n\n"
+    "Envoie un fichier audio (mp3, m4a, wav, ogg, flac) de 20 Mo maximum, une vidéo dont on garde le son, "
+    "ou un lien (YouTube, SoundCloud…).\n\n"
+    "<i>Utilise des musiques libres de droits ou dont tu as la licence : YouTube et TikTok bloquent ou "
+    "démonétisent les vidéos qui contiennent des musiques protégées.</i>"
+)
+
+
+async def music_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str, parts: list[str]) -> None:
+    svc = svc_of(context)
+    q = update.callback_query
+    music = svc.pipeline.music
+    idx = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else -1
+    names = music.names()
+    name = names[idx] if 0 <= idx < len(names) else None
+    if head == "mua":
+        await q.answer()
+        await prompt(update, context, MUSIC_PROMPT, {"kind": "music_add"})
+    elif head == "mut":
+        await q.answer()
+        await show(update, context, await screens.music_track(svc, idx))
+    elif head == "mup":
+        path = music.resolve(name) if name else None
+        if path is None:
+            await q.answer("Piste introuvable", show_alert=True)
+            return
+        if path.stat().st_size > 49 * 1024 * 1024:
+            await q.answer("Fichier trop lourd pour Telegram (50 Mo maximum)", show_alert=True)
+            return
+        await q.answer("Envoi de la piste…")
+        with path.open("rb") as fh:
+            await context.bot.send_audio(update.effective_chat.id, audio=fh, filename=path.name,
+                                         title=path.stem[:60], disable_notification=True)
+    elif head == "mud":
+        if name is None:
+            await q.answer("Piste introuvable", show_alert=True)
+            return
+        await q.answer()
+        await show(update, context, (
+            f"<b>Supprimer « {esc(name)} » ?</b>\n\nLa piste est retirée de la banque et des chaînes qui l'utilisent.",
+            kb([[("Supprimer", f"muD:{idx}"), ("Annuler", f"mut:{idx}")]]),
+        ))
+    elif head == "muD":
+        path = music.resolve(name) if name else None
+        if path is None:
+            await q.answer("Piste introuvable", show_alert=True)
+            return
+        path.unlink(missing_ok=True)
+        for ch in await svc.list_channels():
+            if name in (ch.music_tracks or []):
+                await svc.update_channel(ch.id, music_tracks=[t for t in ch.music_tracks if t != name])
+        await db.log_event(f"Piste supprimée de la bande son : {name}")
+        await q.answer("Piste supprimée")
+        await show(update, context, await screens.music_bank(svc))
+    elif head == "mue":
+        n = 0
+        for ch in await svc.list_channels():
+            if ch.music_volume <= 0:
+                await svc.update_channel(ch.id, music_volume=0.08)
+                n += 1
+        await db.log_event(f"Bande son activée sur {n} chaîne(s)")
+        await q.answer(f"Bande son activée sur {n} chaîne{'s' if n > 1 else ''}")
+        await show(update, context, await screens.music_bank(svc))
+
+
+def _music_dest(svc: Services, name: str, unique: str) -> Path:
+    stem = re.sub(r"[^\w.\- ]+", "_", Path(name).stem).strip(" .") or f"piste_{unique}"
+    suffix = Path(name).suffix.lower()
+    dest_dir = svc.settings.music_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{stem[:80]}{suffix}"
+    if dest.exists():  # ne jamais écraser une piste existante
+        dest = dest_dir / f"{stem[:70]}-{unique}{suffix}"
+    return dest
+
+
+async def _music_added(context: ContextTypes.DEFAULT_TYPE, svc: Services, path: Path, info) -> None:
+    """Vérifie la piste, puis confirme (ou la retire si elle est illisible)."""
+    try:
+        dur = await svc.pipeline.music.duration(path)
+    except Exception:
+        dur = 0.0
+    if dur <= 1:
+        path.unlink(missing_ok=True)
+        await info.edit_text("✕ Ce fichier ne contient pas de son lisible.")
+        return
+    await db.log_event(f"Nouvelle piste dans la bande son : {path.name}")
+    chs = await svc.list_channels()
+    rows = [[("Bande son", "mu"), ("En ajouter une autre", "mua")]]
+    if chs and not any(c.music_volume > 0 for c in chs):
+        rows.insert(0, [("Activer sur toutes les chaînes (8 %)", "mue")])
+    await info.edit_text(f"✓ Piste ajoutée : {path.name}, {int(dur // 60)}:{int(dur % 60):02d}", reply_markup=kb(rows))
+
+
+async def receive_music(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from ..video.music import AUDIO_EXTS
+
+    svc = svc_of(context)
+    msg = update.effective_message
+    media = msg.audio or msg.voice or msg.video or msg.document
+    if media is None:
+        return
+    unique = media.file_unique_id
+    name = getattr(media, "file_name", None) or (f"voix_{unique}.ogg" if msg.voice else f"piste_{unique}.mp3")
+    ext = Path(name).suffix.lower()
+    is_video = msg.video is not None or ext in VIDEO_EXTS
+    if not is_video and ext not in AUDIO_EXTS:
+        await msg.reply_html("Format non pris en charge : envoie un mp3, m4a, wav, ogg ou flac, "
+                             "ou une vidéo dont on garde le son.\n<i>/cancel pour annuler.</i>")
+        return
+    if (media.file_size or 0) > 20 * 1024 * 1024:
+        await msg.reply_html("Ce fichier dépasse 20 Mo : les bots Telegram ne peuvent pas le télécharger.\n"
+                             "Envoie plutôt un lien, ou dépose-le dans <code>data/music/</code>.")
+        return
+    info = await msg.reply_text("Téléchargement…")
+    tg_file = await media.get_file()
+    context.user_data.pop("await", None)
+    if is_video:  # on ne garde que le son
+        work = svc.settings.work_dir
+        work.mkdir(parents=True, exist_ok=True)
+        tmp = work / f"music-{unique}{ext or '.mp4'}"
+        await tg_file.download_to_drive(custom_path=tmp)
+        dest = _music_dest(svc, Path(name).stem + ".m4a", unique)
+        proc = await asyncio.create_subprocess_exec(
+            svc.settings.ffmpeg_bin, "-v", "error", "-y", "-i", str(tmp), "-vn", "-c:a", "aac", "-b:a", "192k",
+            str(dest), stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await proc.communicate()
+        tmp.unlink(missing_ok=True)
+        if proc.returncode != 0:
+            dest.unlink(missing_ok=True)
+            await info.edit_text(f"✕ Son introuvable dans cette vidéo : {err.decode('utf-8', 'replace')[-200:]}")
+            return
+    else:
+        dest = _music_dest(svc, name, unique)
+        await tg_file.download_to_drive(custom_path=dest)
+    await _music_added(context, svc, dest, info)
+
+
+async def _download_music(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: str) -> None:
+    svc = svc_of(context)
+    exe = shutil.which("yt-dlp")
+    if not exe:
+        await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : pip install yt-dlp")
+        return
+    dest_dir = svc.settings.music_dir
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    info = await context.bot.send_message(chat_id, "Téléchargement de la piste… Cela peut prendre une minute.")
+    proc = await asyncio.create_subprocess_exec(
+        exe, "-f", "bestaudio/best", "-x", "--audio-format", "m4a", "--no-playlist", "--restrict-filenames",
+        "--max-filesize", "200M", "-o", str(dest_dir / "%(title).60s-%(id)s.%(ext)s"),
+        "--print", "after_move:filepath", "--quiet", "--no-warnings", "--", url,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await proc.communicate()
+    path = Path(out.decode().strip().splitlines()[-1]) if proc.returncode == 0 and out.strip() else None
+    if path is None or not path.exists():
+        await info.edit_text(f"✕ Échec du téléchargement : {err.decode('utf-8', 'replace')[-300:]}")
+        return
+    await _music_added(context, svc, path, info)
+
+
 # ---------------------------------------------------------------------------- erreurs
 async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.error("Erreur Telegram", exc_info=context.error)
@@ -857,6 +1141,7 @@ def register(app: Application) -> None:
     app.add_handler(CommandHandler("settings", screen_cmd(screens.settings_screen)))
     app.add_handler(CommandHandler("log", screen_cmd(screens.events)))
     app.add_handler(CallbackQueryHandler(on_callback))
-    app.add_handler(MessageHandler(private & (filters.VIDEO | filters.Document.ALL), on_file))
+    app.add_handler(MessageHandler(private & (filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Document.ALL),
+                                   on_file))
     app.add_handler(MessageHandler(private & filters.TEXT & ~filters.COMMAND, on_text))
     app.add_error_handler(on_error)

@@ -88,7 +88,8 @@ class Channel(Base):
     caption_position: Mapped[int] = mapped_column(Integer, default=50)  # % de la hauteur
     show_part_label: Mapped[bool] = mapped_column(Boolean, default=True)
     hook_card: Mapped[bool] = mapped_column(Boolean, default=False)
-    music_volume: Mapped[float] = mapped_column(Float, default=0.0)
+    music_volume: Mapped[float] = mapped_column(Float, default=0.0)  # 0 = pas de bande son
+    music_tracks: Mapped[list[str] | None] = mapped_column(JSON, default=list)  # vide = toute la banque
     bg_volume: Mapped[float] = mapped_column(Float, default=0.0)
 
     # --- Formats -----------------------------------------------------------

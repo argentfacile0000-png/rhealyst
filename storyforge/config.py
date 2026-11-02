@@ -103,6 +103,8 @@ class Settings(BaseSettings):
     # URL publique HTTPS (ex: https://studio.mondomaine.com) — requise pour la Mini App
     # et la page de connexion des comptes YouTube / TikTok.
     public_url: str = ""
+    # Contact affiché sur les pages légales (adresse e-mail ou lien), facultatif
+    legal_contact: str = ""
     # Clé de signature des liens de connexion et des aperçus (générée par install.sh ;
     # à défaut, dérivée du token Telegram).
     secret_key: str = ""

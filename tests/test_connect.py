@@ -130,7 +130,7 @@ async def test_paste_fallback_with_desktop_client(portal_svc, monkeypatch):
 
     r = client.get(f"/connect/{token}")
     assert "La page de retour affiche une erreur" in r.text  # client « Bureau » : retour sur localhost
-    assert "À configurer" in r.text and "TIKTOK_CLIENT_KEY" in r.text
+    assert "À configurer" in r.text and "app TikTok" in r.text and "Plateformes" in r.text
 
     r = client.get(f"/connect/{token}/youtube", follow_redirects=False)
     q = parse_qs(urlparse(r.headers["location"]).query)

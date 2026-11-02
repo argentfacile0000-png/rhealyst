@@ -212,10 +212,3 @@ class BackgroundBank:
         chosen = max(files, key=lambda f: f.duration)
         log.warning("Aucun fond assez long (%.0fs requis) — %s sera bouclé", needed, chosen.path.name)
         return Segment(chosen.path, 0.0, needed, chosen.duration, loop=True)
-
-    def random_music(self, music_dir: Path, rng: random.Random | None = None) -> Path | None:
-        rng = rng or random.Random()
-        if not music_dir.exists():
-            return None
-        tracks = [p for p in music_dir.rglob("*") if p.suffix.lower() in {".mp3", ".wav", ".m4a", ".ogg", ".aac"}]
-        return rng.choice(tracks) if tracks else None

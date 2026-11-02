@@ -21,6 +21,7 @@ from .jobs import Job, JobManager
 from .models import Channel, Publication, PubStatus, Story, Video, VideoFormat, VideoStatus, utcnow
 from .notify import NullNotifier, Notifier, Progress
 from .pipeline import Pipeline
+from .platform_apps import PlatformApps
 from .publishers import PLATFORM_LABELS, PublisherError, instagram, tiktok, youtube
 from .scheduler import Scheduler
 
@@ -72,6 +73,7 @@ class Services:
         self.jobs = JobManager(settings.max_concurrent_renders, 2, busy_file=settings.data_dir / "state" / "busy")
         self.scheduler = Scheduler(self)
         self.oauth = OAuthStates()
+        self.apps = PlatformApps(settings)
         self.started_at = time.time()
         self._quota_cache: tuple[float, dict | None] = (0.0, None)
         self._failures: dict[str, tuple[int, float]] = {}  # "chaîne:format" -> (échecs consécutifs, reprise à)
@@ -85,6 +87,7 @@ class Services:
     async def start(self) -> None:
         self.settings.ensure_dirs()
         await db.init_db(self.settings.db_url)
+        await self.apps.load()
         await self.pipeline.tts.keys.load()
         await self._recover()
         await self.jobs.start()
@@ -534,18 +537,18 @@ class Services:
         s = self.settings
         if platform == "youtube":
             if not self.google_client_file(channel_id).exists():
-                return f"Le fichier OAuth Google {s.google_client_secrets_file} est introuvable sur le serveur."
+                return "Il manque le client OAuth Google (fichier JSON de ton app Google Cloud)."
             return None
         if platform == "instagram":
             if not (s.instagram_app_id and s.instagram_app_secret):
-                return "INSTAGRAM_APP_ID et INSTAGRAM_APP_SECRET ne sont pas renseignés dans le .env."
+                return "Il manque l'ID et la clé secrète de ton app Instagram (Meta for Developers)."
             if not self.portal_available():
                 return "Instagram télécharge les vidéos sur ton serveur : il faut une adresse publique en https (PUBLIC_URL)."
             return None
         if not (s.tiktok_client_key and s.tiktok_client_secret):
-            return "TIKTOK_CLIENT_KEY et TIKTOK_CLIENT_SECRET ne sont pas renseignés dans le .env."
+            return "Il manque le Client key et le Client secret de ton app TikTok (TikTok for Developers)."
         if not self.tiktok_redirect_uri():
-            return "TIKTOK_REDIRECT_URI n'est pas renseigné dans le .env."
+            return "Il manque l'adresse de retour TikTok : configure l'adresse HTTPS du serveur (PUBLIC_URL)."
         return None
 
     def youtube_auth_url(self, channel_id: int, portal: str = "") -> str:

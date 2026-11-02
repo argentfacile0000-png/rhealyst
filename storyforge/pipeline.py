@@ -27,6 +27,7 @@ from .video.background import BackgroundBank
 from .video.captions import CaptionStyle, build_ass, hook_end_time
 from .video.card import render_cover, render_hook_card
 from .video.ffmpeg import probe_dimensions
+from .video.music import MusicBank
 from .video.renderer import RenderJob, grab_frame, make_telegram_preview, make_thumbnail, render
 from .video.split import cut_part, plan_cuts, words_between
 
@@ -70,6 +71,7 @@ class Pipeline:
                                     keys=KeyRing(settings))
         self.tts.on_event = self._tts_event
         self.bank = BackgroundBank(settings.backgrounds_dir, ffprobe=settings.ffprobe_bin)
+        self.music = MusicBank(settings.music_dir, ffprobe=settings.ffprobe_bin)
         # Branchés par Services : file de publication et adresse publique signée d'une vidéo.
         self.enqueue_publish: Callable[[int], object] | None = None
         self.public_media_url: Callable[[int], str] | None = None
@@ -266,11 +268,12 @@ class Pipeline:
                     await progress.update("render", "run", pct=frac, detail=part_txt.strip(" ·"))
 
             await progress.update("render", "run", pct=0.0, detail=part_txt.strip(" ·"))
-            music = self.bank.random_music(self.settings.music_dir, rng) if ch.music_volume > 0 else None
+            music = await self.music.pick(ch.music_tracks, duration, rng) if ch.music_volume > 0 else None
             await render(
                 RenderJob(
                     segment=seg, narration=tts.audio_path, ass_file=ass, output=out, duration=duration,
-                    card_png=card_png, card_until=card_until, music=music,
+                    card_png=card_png, card_until=card_until, music=music.path if music else None,
+                    music_start=music.start if music else 0.0,
                     music_volume=ch.music_volume, bg_volume=ch.bg_volume, width=W, height=H,
                 ),
                 self.settings,

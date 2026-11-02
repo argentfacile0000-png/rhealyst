@@ -14,7 +14,7 @@ from ..models import Channel, Publication, PubStatus, Story, Video, VideoFormat,
 from ..stats import human_delta, overview, to_local, tz
 from ..story.styles import FORMATS, get_language
 from ..version import auto_update_flag, deployed_version
-from .fields import FIELD_MAP, GROUPS, fields_in
+from .fields import FIELD_MAP, GROUPS, fields_in, plural_tracks
 from .ui import (
     BACK,
     CHECK,
@@ -96,9 +96,10 @@ async def home(svc: Services) -> Screen:
     rows = [
         [("Chaînes", "cl"), ("Nouvelle chaîne", "new")],
         [("Générer", "gen"), ("File d'attente", "q")],
-        [("Statistiques", "st"), ("Banque vidéo", "bk")],
-        [("Journal", "ev"), ("Réglages", "set")],
-        [("Reprendre" if o["paused"] else "Pause globale", "sp"), ("Actualiser", "h")],
+        [("Banque vidéo", "bk"), ("Bande son", "mu")],
+        [("Statistiques", "st"), ("Journal", "ev")],
+        [("Réglages", "set"), ("Reprendre" if o["paused"] else "Pause globale", "sp")],
+        [("Actualiser", "h")],
     ]
     url = svc.settings.webapp_url
     if url:
@@ -188,6 +189,8 @@ async def channel_view(svc: Services, cid: int) -> Screen:
             else "désactivées"),
         row("Voix", f"{ch.voice_name or ch.voice_id or 'par défaut'}"),
         row("Fonds", ", ".join(ch.bg_categories) or "toutes catégories"),
+        row("Bande son", f"{round(ch.music_volume * 100)} %, {plural_tracks(ch.music_tracks)}" if ch.music_volume > 0
+            else "aucune"),
         "",
         "<b>Planning</b>",
         row("Créneaux", ", ".join(ch.schedule_times) or "aucun") + f"  {muted(ch.timezone)}",
@@ -231,7 +234,7 @@ async def accounts(svc: Services, cid: int) -> Screen:
         if linked:
             return f"{CHECK} <b>{esc(account or 'connecté')}</b>" + ("" if enabled else "  " + muted("publication désactivée"))
         problem = svc.platform_problem(platform, cid)
-        return muted("à configurer sur le serveur" if problem else "non connecté")
+        return muted("à configurer : Réglages, Plateformes" if problem else "non connecté")
 
     lines = [
         title("Comptes", ch.name),
@@ -251,6 +254,8 @@ async def accounts(svc: Services, cid: int) -> Screen:
         lines.append(muted("Pour une connexion en un clic, configure PUBLIC_URL et WEBAPP_ENABLED (voir le README)."))
         rows.append([("Connecter YouTube", f"cy:{cid}"), ("Connecter TikTok", f"ck:{cid}")])
         rows.append([("Connecter Instagram", f"ci:{cid}")])
+    if any(svc.platform_problem(p, cid) for p in ("youtube", "tiktok", "instagram")):
+        rows.append([("Configurer les plateformes", "pf")])
     unlink = [(f"Déconnecter {PLATFORM[p]}", f"cu:{cid}:{p}")
               for p in ("youtube", "tiktok", "instagram") if getattr(ch, f"{p}_linked")]
     for i in range(0, len(unlink), 2):
@@ -293,6 +298,12 @@ async def field_choices(svc: Services, cid: int, key: str, bg_categories: list[s
             opts = [(c, c) for c in (bg_categories or [])]
             current = set(ch.bg_categories or [])
             lines.append("Choisis les catégories de fond. " + muted("Aucune sélection = toutes."))
+        elif key == "music_tracks":
+            opts = [(short(n.rsplit(".", 1)[0], 28), n) for n in svc.pipeline.music.names()]
+            current = set(ch.music_tracks or [])
+            lines.append("Choisis les pistes de cette chaîne. " + muted("Aucune sélection = toute la banque, au hasard."))
+            if ch.music_volume <= 0:
+                lines.append(muted("La bande son est coupée pour cette chaîne : règle aussi son volume."))
         else:
             opts = f.options
             current = set(getattr(ch, key) or [])
@@ -311,7 +322,8 @@ async def field_choices(svc: Services, cid: int, key: str, bg_categories: list[s
         if line_:
             rows.append(line_)
         if not opts:
-            lines.append(muted("La banque vidéo est vide."))
+            lines.append(muted("La banque son est vide : ajoute des pistes depuis l'accueil, Bande son."
+                               if key == "music_tracks" else "La banque vidéo est vide."))
     else:
         cur = f.current(ch) if f.current else getattr(ch, key)
         line: list = []
@@ -603,6 +615,58 @@ async def bank(svc: Services) -> Screen:
     return "\n".join(lines), kb([[("Ajouter une vidéo", "bka"), ("Rescanner", "bk")], nav()])
 
 
+async def music_bank(svc: Services) -> Screen:
+    tracks = await svc.pipeline.music.summary()
+    chs = await svc.list_channels()
+    lines = [
+        title("Bande son"),
+        muted("Musique de fond mixée sous la voix : une piste tirée au hasard, à partir d'un moment au hasard, "
+              "avec fondu d'entrée et de sortie."),
+        "",
+    ]
+    rows: list[list] = []
+    if not tracks:
+        lines.append(muted("Aucune piste. Envoie un mp3, m4a, wav, ogg ou flac, ou un lien (YouTube, SoundCloud…)."))
+    for i, (name, dur) in enumerate(tracks):
+        lines.append(f"{i + 1}. {esc(short(name, 40))}  {muted(mmss(dur) if dur else 'illisible')}")
+        if i < 30:
+            rows.append([(f"{i + 1}. {short(name, 30)}", f"mut:{i}")])
+    if chs:
+        lines += ["", "<b>Chaînes</b>"]
+        for c in chs[:12]:
+            state = (f"{round(c.music_volume * 100)} %, {plural_tracks(c.music_tracks)}" if c.music_volume > 0
+                     else "coupée")
+            lines.append(row(short(c.name, 24), state))
+        lines.append(muted("Réglage par chaîne : Chaîne, Réglages, Vidéo."))
+    rows.insert(0, [("Ajouter une piste", "mua")])
+    if tracks and chs and not any(c.music_volume > 0 for c in chs):
+        rows.insert(1, [("Activer sur toutes les chaînes (8 %)", "mue")])
+    rows.append(nav())
+    return "\n".join(lines), kb(rows)
+
+
+async def music_track(svc: Services, idx: int) -> Screen:
+    names = svc.pipeline.music.names()
+    if idx >= len(names):
+        return "Piste introuvable.", kb([nav("mu")])
+    name = names[idx]
+    path = svc.pipeline.music.resolve(name)
+    try:
+        dur = await svc.pipeline.music.duration(path) if path else 0.0
+    except Exception:
+        dur = 0.0
+    chs = await svc.list_channels()
+    explicit = [c.name for c in chs if name in (c.music_tracks or [])]
+    random_pool = [c.name for c in chs if c.music_volume > 0 and not c.music_tracks]
+    lines = [title("Piste", short(name, 40)), "", row("Durée", mmss(dur) if dur else "illisible")]
+    if path:
+        lines.append(row("Taille", f"{path.stat().st_size / 1e6:.1f} Mo"))
+    used = explicit + [f"{n} (au hasard)" for n in random_pool]
+    lines.append(row("Utilisée par", ", ".join(used) if used else "aucune chaîne"))
+    rows = [[("Écouter", f"mup:{idx}"), ("Supprimer", f"mud:{idx}")], [("← Bande son", "mu"), (HOME, "h")]]
+    return "\n".join(lines), kb(rows)
+
+
 async def bank_categories(svc: Services) -> Screen:
     cats = sorted(svc.pipeline.bank.categories().keys())
     rows = [[(c, f"bkc:{i}")] for i, c in enumerate(cats)]
@@ -634,7 +698,7 @@ async def settings_screen(svc: Services) -> Screen:
     rows = [
         [("Reprendre" if paused else "Pause globale", "sp"), ("Suivi en direct", "slv")],
         [("Diagnostic", "stt"), ("Journal", "ev")],
-        [("Clés ElevenLabs", "ek")],
+        [("Plateformes", "pf"), ("Clés ElevenLabs", "ek")],
     ]
     if version:
         auto = s.auto_update and not auto_update_flag(s.data_dir).exists()
@@ -646,6 +710,119 @@ async def settings_screen(svc: Services) -> Screen:
         ]
         rows.append([("Suspendre les mises à jour" if auto else "Réactiver les mises à jour", "sau")])
     rows.append(nav())
+    return "\n".join(lines), kb(rows)
+
+
+PLATFORM_CONSOLES = {
+    "youtube": ("Ouvrir Google Cloud", "https://console.cloud.google.com/apis/library/youtube.googleapis.com"),
+    "tiktok": ("Ouvrir TikTok for Developers", "https://developers.tiktok.com/apps/"),
+    "instagram": ("Ouvrir Meta for Developers", "https://developers.facebook.com/apps/"),
+}
+
+
+def _app_state(svc: Services, platform: str) -> str:
+    source = svc.apps.source(platform)
+    if platform == "youtube":
+        client = svc.apps.google_client()
+        if client is None:
+            return muted("à configurer") if source is None else f"{CROSS} fichier illisible"
+        kind = "Application Web" if client[0] == "web" else "Application de bureau"
+        return f"{CHECK} client {kind}"
+    if source is None:
+        return muted("à configurer")
+    return f"{CHECK} configurée" + "  " + muted("depuis le bot" if source == "bot" else "dans le .env")
+
+
+async def platforms(svc: Services) -> Screen:
+    base = svc.settings.public_base
+    lines = [
+        title("Plateformes"),
+        muted("Pour publier, chaque plateforme exige une « app développeur » à ton nom (gratuite). "
+              "Crée-la une seule fois en suivant le guide, puis donne ses identifiants ici : "
+              "ils restent sur ton serveur."),
+        "",
+        f"YouTube  {_app_state(svc, 'youtube')}",
+        f"TikTok  {_app_state(svc, 'tiktok')}",
+        f"Instagram  {_app_state(svc, 'instagram')}",
+        "",
+    ]
+    if svc.portal_available():
+        lines.append(f"Adresse du serveur  <code>{esc(base)}</code>")
+        lines.append(muted("Une fois une app configurée, connecte tes comptes : Chaîne, puis Comptes."))
+    else:
+        lines.append(f"{CROSS} Le serveur n'a pas d'adresse HTTPS : relance <code>bash install.sh --https</code>. "
+                     "TikTok et Instagram en ont besoin.")
+    rows = [[("YouTube", "pfy"), ("TikTok", "pft"), ("Instagram", "pfi")], [("← Réglages", "set"), (HOME, "h")]]
+    return "\n".join(lines), kb(rows)
+
+
+def _code(value: str) -> str:
+    return f"<code>{esc(value)}</code>"
+
+
+async def platform_guide(svc: Services, platform: str) -> Screen:
+    base = svc.settings.public_base or "https://ton-serveur"
+    state = _app_state(svc, platform)
+    if platform == "youtube":
+        lines = [
+            title("YouTube", "Google Cloud"), "", f"État  {state}", "",
+            "1. Ouvre Google Cloud, crée un projet, puis active <b>YouTube Data API v3</b>.",
+            "2. <b>Écran de consentement</b> (Google Auth Platform) : type <i>Externe</i>, ajoute ton adresse Gmail "
+            "comme utilisateur test.",
+            "3. <b>Clients</b>, Créer un client, type <b>Application Web</b>. URI de redirection autorisée :",
+            f"    {_code(base + '/oauth/youtube')}",
+            "4. Télécharge le JSON du client, puis appuie sur <b>Envoyer le fichier JSON</b>.",
+            "5. <b>Audience</b> : clique <i>Publier l'application</i>. Sinon Google déconnecte YouTube au bout de 7 jours. "
+            "À la connexion, Google affiche « application non validée » : Paramètres avancés, puis Accéder.",
+            "",
+            muted("Tant que ton projet n'a pas passé l'audit de l'API YouTube, les vidéos mises en ligne restent "
+                  "privées. Demande l'audit : support.google.com/youtube/contact/yt_api_form"),
+        ]
+        rows = [[("Envoyer le fichier JSON", "pfg")]]
+    elif platform == "tiktok":
+        lines = [
+            title("TikTok", "TikTok for Developers"), "", f"État  {state}", "",
+            "1. Ouvre TikTok for Developers, connecte-toi, puis <b>Manage apps</b>, <b>Connect an app</b>.",
+            "2. Renseigne l'app (plateforme <b>Web</b>) :",
+            f"    Web/Desktop URL : {_code(base)}",
+            f"    Terms of Service URL : {_code(base + '/legal/terms')}",
+            f"    Privacy Policy URL : {_code(base + '/legal/privacy')}",
+            "3. Ajoute <b>Login Kit</b> et <b>Content Posting API</b> (active <i>Direct Post</i>). Redirect URI :",
+            f"    {_code(base + '/oauth/tiktok')}",
+            "    Scopes : <code>user.info.basic</code>, <code>video.upload</code>, <code>video.publish</code>",
+            "4. Copie le <b>Client key</b> et le <b>Client secret</b>, puis appuie sur <b>Saisir les clés</b>.",
+            "5. Envoie l'app en revue (<i>Submit for review</i>).",
+            "",
+            muted("Tant que TikTok n'a pas audité l'app, les vidéos ne peuvent être publiées qu'en privé (Moi seul). "
+                  "En attendant, règle le mode TikTok de la chaîne sur Brouillon : tu finalises dans l'app."),
+        ]
+        rows = [[("Saisir les clés", "pfk:tiktok")]]
+    else:
+        lines = [
+            title("Instagram", "Meta for Developers"), "", f"État  {state}", "",
+            "Il faut un compte Instagram <b>professionnel</b> (Créateur ou Entreprise).",
+            "",
+            "1. Ouvre Meta for Developers, <b>Créer une app</b>, cas d'usage <i>Gérer les messages et le contenu "
+            "sur Instagram</i>.",
+            "2. <b>Configuration de l'API avec connexion Instagram</b>, étape « connexion professionnelle » : "
+            "URL de redirection OAuth :",
+            f"    {_code(base + '/oauth/instagram')}",
+            "3. <b>Paramètres de l'app</b>, Général :",
+            f"    Politique de confidentialité : {_code(base + '/legal/privacy')}",
+            f"    Suppression des données : {_code(base + '/legal/data-deletion')}",
+            "4. <b>Rôles de l'app</b> : ajoute ton compte Instagram comme testeur, puis accepte l'invitation dans "
+            "Instagram (Paramètres, Apps et sites web).",
+            "5. Copie l'<b>ID de l'app Instagram</b> et sa <b>clé secrète</b> (étape 2), puis appuie sur "
+            "<b>Saisir les clés</b>.",
+            "",
+            muted("En mode développement, l'app publie sur les comptes testeurs : ça suffit pour tes propres comptes."),
+        ]
+        rows = [[("Saisir les clés", "pfk:instagram")]]
+    label, url = PLATFORM_CONSOLES[platform]
+    rows.append([(label, url)])
+    if svc.apps.source(platform) in ("bot", "fichier"):
+        rows.append([("Retirer ces identifiants", f"pfx:{platform}")])
+    rows.append([("← Plateformes", "pf"), (HOME, "h")])
     return "\n".join(lines), kb(rows)
 
 

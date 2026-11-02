@@ -175,7 +175,7 @@ async def test_instagram_connection_portal(svc, monkeypatch):
     s = svc.settings
     s.webapp_enabled, s.public_url = True, PUBLIC
     ch = await svc.create_channel("Insta")
-    assert "INSTAGRAM_APP_ID" in svc.platform_problem("instagram", ch.id)
+    assert "app Instagram" in svc.platform_problem("instagram", ch.id)
     s.instagram_app_id, s.instagram_app_secret = "app", "secret"
     assert svc.platform_problem("instagram", ch.id) is None and svc.oauth_is_automatic("instagram", ch.id)
 

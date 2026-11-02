@@ -67,6 +67,19 @@ async def _token_request(form: dict) -> dict:
     return _with_expiry(data)
 
 
+async def check_client(client_key: str, client_secret: str) -> bool | None:
+    """Vérifie les identifiants de l'app (jeton « client_credentials »).
+
+    Vrai si TikTok les accepte, None si TikTok est injoignable ; lève PublisherError s'ils sont refusés.
+    """
+    try:
+        await _token_request({"client_key": client_key, "client_secret": client_secret,
+                              "grant_type": "client_credentials"})
+    except httpx.HTTPError:
+        return None
+    return True
+
+
 async def exchange_code(client_key: str, client_secret: str, redirect_uri: str, code: str) -> dict:
     return await _token_request(
         {

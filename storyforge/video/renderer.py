@@ -28,6 +28,7 @@ class RenderJob:
     card_until: float = 0.0
     music: Path | None = None
     music_volume: float = 0.0
+    music_start: float = 0.0  # départ dans la piste (s)
     bg_volume: float = 0.0
     width: int = 0  # 0 = réglages (vertical) ; 1920×1080 pour une vidéo longue
     height: int = 0
@@ -66,7 +67,10 @@ async def render(job: RenderJob, settings: Settings, on_progress: ProgressCb | N
         card_idx = inputs
         inputs += 1
     if job.music and job.music_volume > 0:
-        args += ["-stream_loop", "-1", "-i", str(job.music.resolve())]
+        args += ["-stream_loop", "-1"]
+        if job.music_start > 0:
+            args += ["-ss", f"{job.music_start:.3f}"]
+        args += ["-i", str(job.music.resolve())]
         music_idx = inputs
         inputs += 1
 
@@ -88,7 +92,12 @@ async def render(job: RenderJob, settings: Settings, on_progress: ProgressCb | N
         af.append(f"[0:a]aresample=44100,aformat=channel_layouts=stereo,volume={job.bg_volume:.3f}[bga]")
         mix.append("[bga]")
     if music_idx is not None:
-        af.append(f"[{music_idx}:a]aresample=44100,aformat=channel_layouts=stereo,volume={job.music_volume:.3f}[mus]")
+        # Fondu d'entrée et de sortie : la bande son ne démarre ni ne s'arrête brutalement
+        fade_out = max(0.0, job.duration - 2.5)
+        af.append(
+            f"[{music_idx}:a]aresample=44100,aformat=channel_layouts=stereo,volume={job.music_volume:.3f},"
+            f"afade=t=in:st=0:d=1.5,afade=t=out:st={fade_out:.3f}:d=2.5[mus]"
+        )
         mix.append("[mus]")
     if len(mix) > 1:
         af.append(f"{''.join(mix)}amix=inputs={len(mix)}:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[a]")

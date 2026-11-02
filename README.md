@@ -81,6 +81,12 @@ vidéo est publiée avec une image automatique.
 - **Programmer.** Publie une vidéo à une date précise : « demain 18h », « vendredi 21h », « 25/12 18:30 »,
   « dans 2h »… ou un bouton rapide (ce soir 20:00, demain 12:00…). La date suit le fuseau de la chaîne ;
   les programmations sont conservées après un redémarrage et rattrapées si l'heure est passée entre-temps.
+- **Bande son.** Accueil → **Bande son** → Ajouter une piste : envoie un fichier audio (mp3, m4a, wav, ogg, flac),
+  une vidéo dont on garde le son, ou un lien (YouTube, SoundCloud…). Chaque vidéo tire une piste au hasard et la
+  démarre à un moment au hasard, avec fondu d'entrée et de sortie, mixée sous la voix. Par chaîne (Réglages →
+  Vidéo) : **Bande son** règle le volume (5 à 30 %, « Aucune » pour couper) et **Pistes** limite le tirage à
+  certaines pistes. Utilise des musiques libres de droits : YouTube et TikTok bloquent ou démonétisent les
+  vidéos qui contiennent des musiques protégées.
 
 ## Le dashboard Telegram
 
@@ -204,6 +210,13 @@ python -m storyforge story --lang fr --format askreddit --parts 2 --seconds 80  
 
 ## Configuration des plateformes
 
+Chaque plateforme exige une « app développeur » à ton nom (gratuite), créée une seule fois. Le bot te guide :
+**Réglages → Plateformes**, puis YouTube, TikTok ou Instagram. Chaque guide donne les adresses exactes à copier
+(adresse de retour, conditions d'utilisation, politique de confidentialité, suppression des données : le serveur
+publie ces pages sur `/legal/…`) et te laisse envoyer le fichier JSON Google ou saisir les clés TikTok / Instagram
+directement dans Telegram. Ils restent sur ton serveur et priment sur le `.env` ; tes messages contenant une clé
+sont supprimés après lecture. Les sections ci-dessous détaillent les mêmes étapes.
+
 ### Connexion des comptes
 
 Chaque chaîne a sa page **Comptes** (bot : chaîne → Comptes ; Mini App : bouton Comptes). Elle ouvre une
@@ -231,7 +244,8 @@ puis tu colles dans Telegram l'adresse de la page de retour.
 3. Identifiants, puis **ID client OAuth** :
    - avec `PUBLIC_URL` : type **Application Web**, URI de redirection autorisée `https://studio.mondomaine.com/oauth/youtube` ;
    - sans URL publique : type **Application de bureau**.
-4. Télécharge le JSON et place-le dans `secrets/google_client_secret.json`.
+4. Télécharge le JSON et envoie-le au bot (Réglages → Plateformes → YouTube), ou place-le dans
+   `secrets/google_client_secret.json`.
 5. Connecte la chaîne depuis sa page Comptes. Si Google affiche « Application non validée » : Paramètres avancés,
    puis Accéder à StoryForge (c'est ta propre application).
 
@@ -246,7 +260,8 @@ Les vidéos sont déclarées comme contenant des médias synthétiques (`contain
 1. [developers.tiktok.com](https://developers.tiktok.com/) : crée une app, ajoute **Login Kit** et **Content Posting API**
    (scopes `user.info.basic`, `video.upload`, `video.publish`).
 2. Déclare la **Redirect URI** `https://studio.mondomaine.com/oauth/tiktok`.
-   Renseigne `TIKTOK_CLIENT_KEY` et `TIKTOK_CLIENT_SECRET` ; `TIKTOK_REDIRECT_URI` peut rester vide avec `PUBLIC_URL`.
+   Saisis le Client key et le Client secret dans le bot (Réglages → Plateformes → TikTok, ils sont vérifiés
+   auprès de TikTok), ou dans le `.env` (`TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`).
 3. Connecte le compte depuis la page Comptes de la chaîne.
 4. Optionnel : réglage « Pseudo TikTok » de la chaîne, pour que les liens des vidéos soient corrects.
 
@@ -261,8 +276,9 @@ Les vidéos sont déclarées comme contenant des médias synthétiques (`contain
 2. [developers.facebook.com](https://developers.facebook.com/) : crée une app, ajoute le produit **Instagram**
    et choisis la configuration **avec connexion Instagram** (permissions `instagram_business_basic` et
    `instagram_business_content_publish`). Ajoute ton compte Instagram comme testeur tant que l'app n'est pas validée.
-3. Ajoute l'URI de redirection `https://studio.mondomaine.com/oauth/instagram`, puis renseigne
-   `INSTAGRAM_APP_ID` et `INSTAGRAM_APP_SECRET` dans le `.env`.
+3. Ajoute l'URI de redirection `https://studio.mondomaine.com/oauth/instagram`, puis saisis l'ID et la clé secrète
+   de l'app Instagram dans le bot (Réglages → Plateformes → Instagram), ou dans le `.env`
+   (`INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET`).
 4. Connecte le compte depuis la page Comptes de la chaîne.
 
 > Avec la connexion Instagram, l'API ne reçoit pas le fichier : Instagram télécharge chaque vidéo sur ton serveur,

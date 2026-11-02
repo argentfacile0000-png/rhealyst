@@ -96,6 +96,11 @@ def _long_times(text: str) -> dict[str, Any]:
     return {"long_schedule_times": times[:6]}
 
 
+def plural_tracks(tracks: list[str] | None) -> str:
+    n = len(tracks or [])
+    return "toutes, au hasard" if not n else f"{n} piste{'s' if n > 1 else ''} choisie{'s' if n > 1 else ''}"
+
+
 def _duration_apply(v: str) -> dict[str, Any]:
     lo, hi = (int(x) for x in v.split("-"))
     return {"min_seconds": lo, "max_seconds": hi}
@@ -160,8 +165,11 @@ FIELDS: list[Field] = [
           options=[("Haut", 30), ("Centre", 50), ("Bas", 68)]),
     Field("show_part_label", "Label « Partie N »", "video", "toggle"),
     Field("hook_card", "Carte d'accroche", "video", "toggle"),
-    Field("music_volume", "Musique", "video", "choice",
-          options=[("Aucune", 0.0), ("5 %", 0.05), ("8 %", 0.08), ("12 %", 0.12)]),
+    Field("music_volume", "Bande son", "video", "choice",
+          options=[("Aucune", 0.0), ("Très discrète 5 %", 0.05), ("Discrète 8 %", 0.08), ("12 %", 0.12),
+                   ("15 %", 0.15), ("20 %", 0.2), ("30 %", 0.3)]),
+    Field("music_tracks", "Pistes de la bande son", "video", "multi",
+          show=lambda c: plural_tracks(c.music_tracks)),
     Field("bg_volume", "Son du fond", "video", "choice",
           options=[("Coupé", 0.0), ("5 %", 0.05), ("10 %", 0.1), ("20 %", 0.2)]),
     # --- Planning

@@ -64,7 +64,11 @@ class FakeMessage:
     def __init__(self, text: str):
         self.text = text
         self.replies: list[str] = []
-        self.video = self.document = None
+        self.video = self.document = self.audio = self.voice = None
+        self.deleted = False
+
+    async def delete(self):
+        self.deleted = True
 
     async def reply_html(self, text, **kw):
         self.replies.append(text)

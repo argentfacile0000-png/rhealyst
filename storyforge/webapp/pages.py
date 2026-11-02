@@ -159,8 +159,10 @@ def _platform_card(platform: str, ch: Channel, token: str, *, problem: str | Non
         '  </div>',
     ]
     if problem:
-        body.append(f'  <p class="text-sm text-muted mt-4 leading-relaxed">{e(problem)} '
-                    'Consulte la section « Configuration des plateformes » du README.</p>')
+        body.append(f'  <p class="text-sm text-muted mt-4 leading-relaxed">{e(problem)}</p>')
+        body.append('  <p class="text-sm mt-3 leading-relaxed">Configure-le depuis le bot Telegram : '
+                    '<b>Réglages</b>, puis <b>Plateformes</b>. Le guide pas à pas indique quoi créer et quoi copier, '
+                    'puis cette page te permettra de te connecter.</p>')
     else:
         body += [
             '  <p class="text-sm mt-6 mb-2 font-medium">StoryForge pourra :</p>',
@@ -243,3 +245,84 @@ def expired(telegram_url: str = "") -> HTMLResponse:
       « Comptes » pour en obtenir un nouveau.{link}</p>
     </div>"""
     return page("Lien expiré", body, status=403)
+
+
+# ---------------------------------------------------------------- pages publiques (exigées par TikTok et Meta)
+LEGAL_TITLES = {
+    "privacy": "Privacy Policy · Politique de confidentialité",
+    "terms": "Terms of Service · Conditions d'utilisation",
+    "data-deletion": "Data deletion · Suppression des données",
+}
+
+
+def _section(heading: str, *paragraphs: str) -> str:
+    ps = "".join(f'<p class="text-muted leading-relaxed mb-4">{p}</p>' for p in paragraphs)
+    return f'<h2 class="text-lg font-semibold tracking-tight mt-10 mb-3">{e(heading)}</h2>{ps}'
+
+
+def legal(kind: str, *, base: str, contact: str = "") -> HTMLResponse:
+    who = f"the operator of {e(base)}" if base else "the operator of this server"
+    href = f"mailto:{contact}" if "@" in contact and not contact.startswith(("http", "mailto:")) else contact
+    reach = (f'Contact: <a class="underline underline-offset-4" href="{e(href)}">{e(contact)}</a>.'
+             if contact else "Contact the operator of this server.")
+    if kind == "privacy":
+        body = (
+            f'<h1 class="text-3xl font-bold tracking-tight mb-4">Privacy Policy</h1>'
+            f'<p class="text-muted leading-relaxed mb-4">StoryForge is a private, self-hosted tool used by {who} to publish '
+            "their own short videos to their own YouTube, TikTok and Instagram accounts. It is not offered to the public.</p>"
+            + _section("Data we access",
+                       "When an account is connected, StoryForge receives an access token and basic profile information "
+                       "(channel name, display name or username). It uses them only to upload and publish videos that the "
+                       "account owner created and approved, and to show which account is connected.")
+            + _section("Storage and sharing",
+                       "Tokens and profile names are stored on the operator's own server and are never sold, shared with "
+                       "third parties or used for advertising. Video files are deleted from the server after a few days.")
+            + _section("Your choices",
+                       "You can disconnect an account at any time from the connection page, or revoke StoryForge's access in "
+                       "your Google, TikTok or Instagram settings. Stored tokens are then deleted. " + reach)
+            + _section("Résumé en français",
+                       "StoryForge est un outil privé, hébergé par son propriétaire, qui publie ses propres vidéos sur ses "
+                       "propres comptes. Les jetons d'accès restent sur son serveur, ne sont jamais partagés ni revendus, et "
+                       "sont supprimés à la déconnexion du compte.")
+        )
+    elif kind == "terms":
+        body = (
+            '<h1 class="text-3xl font-bold tracking-tight mb-4">Terms of Service</h1>'
+            f'<p class="text-muted leading-relaxed mb-4">StoryForge is a private publishing tool operated by {who} for '
+            "their own accounts. By connecting an account you authorise StoryForge to upload and publish videos on it, "
+            "on behalf of the account owner.</p>"
+            + _section("Use", "The tool may only be used with accounts owned or managed by the operator, in compliance with "
+                              "the terms and community guidelines of YouTube, TikTok and Instagram. Content published is the "
+                              "sole responsibility of the account owner.")
+            + _section("Availability", "The service is provided as is, without warranty. Access can be revoked at any time "
+                                       "from the platform settings. " + reach)
+            + _section("Résumé en français", "Outil privé de publication, utilisé uniquement sur les comptes de son "
+                                             "propriétaire, dans le respect des règles de chaque plateforme.")
+        )
+    else:
+        body = (
+            '<h1 class="text-3xl font-bold tracking-tight mb-4">Data deletion</h1>'
+            '<p class="text-muted leading-relaxed mb-4">To delete the data StoryForge holds about your account:</p>'
+            '<ol class="list-decimal pl-5 text-muted leading-relaxed space-y-2 mb-4">'
+            "<li>Instagram: Settings, Apps and websites, remove StoryForge. TikTok: Settings, Security, Manage app "
+            "permissions. Google: myaccount.google.com/permissions.</li>"
+            "<li>The access token immediately stops working. The operator deletes the stored token and profile name when "
+            "the account is disconnected, or on request.</li></ol>"
+            f'<p class="text-muted leading-relaxed mb-4">{reach}</p>'
+            + _section("En français", "Retire l'accès de StoryForge dans les réglages de ton compte (Instagram : Apps et "
+                                      "sites web ; TikTok : Gérer les autorisations ; Google : autorisations du compte). "
+                                      "Le jeton ne fonctionne plus et il est supprimé du serveur.")
+        )
+    return page(LEGAL_TITLES[kind], body, subtitle="StoryForge", note="StoryForge · outil privé de publication")
+
+
+def landing(base: str) -> HTMLResponse:
+    links = " · ".join(f'<a class="underline underline-offset-4" href="/legal/{k}">{e(v.split(" · ")[0])}</a>'
+                       for k, v in LEGAL_TITLES.items())
+    body = (
+        '<h1 class="text-3xl sm:text-4xl font-bold tracking-tight mb-4">StoryForge</h1>'
+        '<p class="text-muted leading-relaxed mb-8 max-w-xl">Private tool that publishes its owner\'s short videos to their '
+        "own YouTube, TikTok and Instagram accounts. Outil privé de publication de vidéos.</p>"
+        f'<p class="text-sm text-muted">{links}</p>'
+    )
+    return page("StoryForge", body, subtitle="Outil privé de publication", note="StoryForge")

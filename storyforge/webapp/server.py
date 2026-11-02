@@ -101,7 +101,7 @@ def create_app(svc: Services) -> FastAPI:
             h.setdefault("Strict-Transport-Security", "max-age=31536000")
         if path == "/app":
             h.setdefault("Content-Security-Policy", CSP_APP)
-        elif path.startswith(("/connect", "/oauth")):
+        elif path == "/" or path.startswith(("/connect", "/oauth", "/legal")):
             h.setdefault("Content-Security-Policy", CSP_PAGE)
             h.setdefault("X-Frame-Options", "DENY")
         elif not path.startswith("/static/"):
@@ -126,8 +126,15 @@ def create_app(svc: Services) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.get("/")
-    async def root() -> RedirectResponse:
-        return RedirectResponse("/app")
+    async def root() -> HTMLResponse:
+        return pages.landing(settings.public_base)
+
+    @app.get("/legal/{kind}")
+    async def legal(kind: str) -> HTMLResponse:
+        """Pages exigées par TikTok et Meta pour créer une app (conditions, confidentialité, suppression)."""
+        if kind not in pages.LEGAL_TITLES:
+            raise HTTPException(404)
+        return pages.legal(kind, base=settings.public_base, contact=settings.legal_contact)
 
     @app.get("/healthz")
     async def health() -> dict:
