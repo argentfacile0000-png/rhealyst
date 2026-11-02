@@ -236,8 +236,13 @@ async def check_proxy_reaches_youtube(url: str, timeout: float = 10.0) -> bool:
         return False
 
 
-async def test_proxy_list(on_progress=None, concurrency: int = 64) -> tuple[int, int]:
-    """Teste toute la liste (YouTube joignable ?) et range les proxies fonctionnels en tête. Retourne (ok, total)."""
+async def test_proxy_list(on_progress=None, concurrency: int = 64, per_proxy: float = 15.0,
+                          deadline: float = 300.0) -> tuple[int, int]:
+    """Teste toute la liste (YouTube joignable ?) et range les proxies fonctionnels en tête. Retourne (ok, total).
+
+    Certains proxies gratuits acceptent la connexion puis ne répondent jamais : chaque essai est coupé après
+    `per_proxy` secondes et le test entier après `deadline` secondes (les proxies restés muets comptent en échec).
+    """
     import asyncio
     import time
 
@@ -250,12 +255,27 @@ async def test_proxy_list(on_progress=None, concurrency: int = 64) -> tuple[int,
     async def one(u: str) -> None:
         nonlocal done
         async with sem:
-            results[u] = await check_proxy_reaches_youtube(u)
+            try:
+                results[u] = await asyncio.wait_for(check_proxy_reaches_youtube(u, timeout=per_proxy - 5),
+                                                    timeout=per_proxy)
+            except (asyncio.TimeoutError, Exception):
+                results[u] = False
         done += 1
-        if on_progress and done % 50 == 0:
-            await on_progress(done, len(urls))
+        if on_progress and (done % 50 == 0 or done == len(urls)):
+            try:
+                await on_progress(done, len(urls))
+            except Exception:
+                pass
 
-    await asyncio.gather(*(one(u) for u in urls))
+    tasks = [asyncio.create_task(one(u)) for u in urls]
+    if tasks:
+        _, pending = await asyncio.wait(tasks, timeout=deadline)
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+    for u in urls:  # coupés par la limite de temps : en échec
+        results.setdefault(u, False)
     ok = [u for u in urls if results.get(u)]
     # La liste a pu changer pendant le test (remplacée, retirée) : on ne met à jour que ce qui est encore dedans.
     now = time.time()

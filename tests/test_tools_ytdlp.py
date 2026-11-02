@@ -242,3 +242,41 @@ async def test_proxy_list_from_the_bot(svc, monkeypatch):
     for _ in range(20):  # le test lancé en fond se termine après le retrait
         await asyncio.sleep(0.02)
     assert (await tools.proxy_state())["list"] == []  # il ne remet pas l'ancienne liste
+
+
+@needs_ffmpeg
+async def test_proxy_test_never_hangs(svc, monkeypatch):
+    """Des proxies qui acceptent la connexion puis ne répondent jamais ne bloquent plus le test (bug « 950/1000 »)."""
+    import asyncio
+    import time
+
+    urls = [f"http://10.0.0.{i}:8080" for i in range(120)]
+    await tools.set_proxy_list(urls)
+
+    async def check(url, timeout=10.0):
+        n = int(url.split(".")[3].split(":")[0])
+        if n % 10 == 0:  # muet pour toujours
+            await asyncio.Event().wait()
+        return n % 2 == 1
+
+    monkeypatch.setattr(tools, "check_proxy_reaches_youtube", check)
+    seen = []
+
+    async def progress(done, total):
+        seen.append((done, total))
+
+    start = time.monotonic()
+    ok, total = await tools.test_proxy_list(progress, per_proxy=0.3, deadline=5)
+    assert time.monotonic() - start < 4
+    assert total == 120 and ok == 60 and seen[-1] == (120, 120)
+    st = await tools.proxy_state()
+    assert st["tested_at"] and len(st["ok"]) == 60 and "http://10.0.0.10:8080" in st["bad"]
+
+    # Limite globale : même si chaque essai traîne, le test se termine
+    async def slow(url, timeout=10.0):
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(tools, "check_proxy_reaches_youtube", slow)
+    start = time.monotonic()
+    ok, total = await tools.test_proxy_list(None, per_proxy=30, deadline=0.5)
+    assert time.monotonic() - start < 3 and ok == 0
