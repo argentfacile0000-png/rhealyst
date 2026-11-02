@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -26,6 +25,7 @@ from .. import db
 from ..models import VideoFormat, VideoStatus
 from ..publishers import PublisherError
 from ..dates import parse_when
+from ..tools import js_runtime_args, ytdlp_command, ytdlp_hint
 from ..version import auto_update_flag
 from ..video.background import VIDEO_EXTS
 from . import screens
@@ -414,7 +414,7 @@ async def test_apis(svc: Services) -> screens.Screen:
     check(has_google, "OAuth Google", "présent" if has_google else "secrets/google_client_secret.json manquant")
     tt_ok = bool(s.tiktok_client_key and s.tiktok_client_secret and s.tiktok_redirect_uri)
     check(tt_ok, "TikTok", "configuré" if tt_ok else "clés manquantes")
-    check(bool(shutil.which("yt-dlp")), "yt-dlp", "ajout de fonds par lien")
+    check(bool(ytdlp_command()), "yt-dlp", "ajout de fonds par lien")
     return "\n".join(lines), kb([[("Relancer", "stt"), ("← Réglages", "set")]])
 
 
@@ -842,15 +842,15 @@ def _cat_index(svc: Services, category: str) -> int:
 
 async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: str, category: str) -> None:
     svc = svc_of(context)
-    exe = shutil.which("yt-dlp")
+    exe = ytdlp_command()
     if not exe:
-        await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : pip install yt-dlp")
+        await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : relance install.sh sur le serveur")
         return
     dest_dir = svc.settings.backgrounds_dir / category
     dest_dir.mkdir(parents=True, exist_ok=True)
     info = await context.bot.send_message(chat_id, f"Téléchargement dans « {category} »… Cela peut prendre quelques minutes.")
     proc = await asyncio.create_subprocess_exec(
-        exe, "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
+        *exe, *js_runtime_args(), "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
         "--merge-output-format", "mp4", "--no-playlist", "--restrict-filenames",
         "-o", str(dest_dir / "%(title).60s-%(id)s.%(ext)s"), "--print", "after_move:filepath",
         "--quiet", "--no-warnings", "--", url,
@@ -858,7 +858,7 @@ async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: st
     )
     out, err = await proc.communicate()
     if proc.returncode != 0:
-        await info.edit_text(f"✕ Échec du téléchargement : {err.decode('utf-8', 'replace')[-300:]}")
+        await info.edit_text(f"✕ Échec du téléchargement : {ytdlp_hint(err.decode('utf-8', 'replace'))}")
         return
     path = Path(out.decode().strip().splitlines()[-1]) if out.strip() else None
     dur = await svc.pipeline.bank.duration(path) if path and path.exists() else 0
@@ -1140,15 +1140,15 @@ async def receive_music(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def _download_music(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: str) -> None:
     svc = svc_of(context)
-    exe = shutil.which("yt-dlp")
+    exe = ytdlp_command()
     if not exe:
-        await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : pip install yt-dlp")
+        await context.bot.send_message(chat_id, "yt-dlp n'est pas installé : relance install.sh sur le serveur")
         return
     dest_dir = svc.settings.music_dir
     dest_dir.mkdir(parents=True, exist_ok=True)
     info = await context.bot.send_message(chat_id, "Téléchargement de la piste… Cela peut prendre une minute.")
     proc = await asyncio.create_subprocess_exec(
-        exe, "-f", "bestaudio/best", "-x", "--audio-format", "m4a", "--no-playlist", "--restrict-filenames",
+        *exe, *js_runtime_args(), "-f", "bestaudio/best", "-x", "--audio-format", "m4a", "--no-playlist", "--restrict-filenames",
         "--max-filesize", "200M", "-o", str(dest_dir / "%(title).60s-%(id)s.%(ext)s"),
         "--print", "after_move:filepath", "--quiet", "--no-warnings", "--", url,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -1156,7 +1156,7 @@ async def _download_music(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url:
     out, err = await proc.communicate()
     path = Path(out.decode().strip().splitlines()[-1]) if proc.returncode == 0 and out.strip() else None
     if path is None or not path.exists():
-        await info.edit_text(f"✕ Échec du téléchargement : {err.decode('utf-8', 'replace')[-300:]}")
+        await info.edit_text(f"✕ Échec du téléchargement : {ytdlp_hint(err.decode('utf-8', 'replace'))}")
         return
     await _music_added(context, svc, path, info)
 

@@ -13,3 +13,5 @@ google-auth-oauthlib>=1.2
 pydantic>=2.7
 pydantic-settings>=2.3
 python-dotenv>=1.0
+# Téléchargement de fonds et de musiques par lien (avec les scripts YouTube « EJS »)
+yt-dlp[default]

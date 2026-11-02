@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -13,6 +12,7 @@ from .. import db
 from ..models import Channel, Publication, PubStatus, Story, Video, VideoFormat, VideoStatus
 from ..stats import human_delta, overview, to_local, tz
 from ..story.styles import FORMATS, get_language
+from ..tools import ytdlp_command
 from ..version import auto_update_flag, deployed_version
 from .fields import FIELD_MAP, GROUPS, fields_in, plural_tracks
 from .ui import (
@@ -614,7 +614,7 @@ async def bank(svc: Services) -> Screen:
         lines.append(f"{esc(cat)}  <b>{plural(info['files'], 'vidéo')}</b>  {muted(hhmm(info['seconds']))}")
     if summary:
         lines += ["", row("Total", hhmm(total))]
-    lines.append(row("Ajout par lien", "disponible" if shutil.which("yt-dlp") else "yt-dlp non installé"))
+    lines.append(row("Ajout par lien", "disponible" if ytdlp_command() else "yt-dlp non installé"))
     return "\n".join(lines), kb([[("Ajouter une vidéo", "bka"), ("Rescanner", "bk")], nav()])
 
 

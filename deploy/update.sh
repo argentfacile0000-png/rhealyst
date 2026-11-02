@@ -129,7 +129,8 @@ echo "$latest" | as_user tee "$tmp/.version" >/dev/null
 
 # Dépendances (uv réutilise son cache : quelques secondes si rien n'a changé)
 UV="$(as_user bash -lc 'command -v uv || echo $HOME/.local/bin/uv')"
-as_user "$UV" pip install -q --python "$APP/.venv/bin/python" -r "$tmp/requirements.txt" yt-dlp
+# yt-dlp est toujours mis à jour : YouTube change souvent et casse les anciennes versions
+as_user "$UV" pip install -q --python "$APP/.venv/bin/python" -r "$tmp/requirements.txt" --upgrade-package yt-dlp
 
 # Bascule atomique, avec la version précédente gardée pour le retour arrière
 as_user rm -rf -- "${APP:?}/src.previous"

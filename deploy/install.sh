@@ -128,7 +128,7 @@ ok "Version ${sha:0:7} installée dans $APP/src"
 # ---------------------------------------------------------------- 4. dépendances
 step "Dépendances Python"
 [ -x "$APP/.venv/bin/python" ] || uv venv -q --python 3.12 "$APP/.venv"
-uv pip install -q --python "$APP/.venv/bin/python" -r "$APP/src/requirements.txt" yt-dlp
+uv pip install -q --python "$APP/.venv/bin/python" -r "$APP/src/requirements.txt" --upgrade-package yt-dlp
 ok "Environnement prêt ($("$APP/.venv/bin/python" --version))"
 
 # ---------------------------------------------------------------- 5. configuration (.env)
