@@ -217,11 +217,10 @@ class StoryGenerator:
         errors = []
         for i, key in enumerate(candidates):
             llm = key.config(self.settings)
-            client = AsyncOpenAI(api_key=key.key, base_url=llm.base_url, max_retries=1)
             req = dict(kwargs, **{k: v for k, v in self._request_kwargs(kwargs["messages"], long_form, llm).items()
                                   if k != "messages"})
             try:
-                resp = await self._create_with(client, llm, req)
+                resp = await self._call_key(key, llm, req, long_form)
             except KeyFailure as exc:
                 errors.append(f"{key.label} {key.masked} : {exc.reason}")
                 await self.keys.mark_failed(key, exc.cooldown, exc.reason)
@@ -238,13 +237,42 @@ class StoryGenerator:
             return resp
         raise StoryError("Aucune clé d'IA n'a répondu : " + " ; ".join(errors))
 
+    async def _call_key(self, key, llm, req: dict, long_form: bool = False):
+        if key.provider == "bedrock":
+            from . import bedrock
+
+            try:
+                return await bedrock.converse(
+                    key.key, key.region or "us-east-1", llm.model, req["messages"],
+                    max_tokens=req.get("max_tokens") or req.get("max_completion_tokens") or (16000 if long_form else 8192),
+                    temperature=req.get("temperature"),
+                )
+            except bedrock.BedrockError as exc:
+                raise KeyFailure(str(exc), exc.cooldown, exc.reason) from exc
+        client = AsyncOpenAI(api_key=key.key, base_url=llm.base_url, max_retries=1)
+        return await self._create_with(client, llm, req)
+
     async def ping_key(self, key) -> str:
-        """Vérifie une clé avec une requête minuscule. Retourne « fournisseur · modèle »."""
+        """Vérifie une clé (et son modèle) avec une requête minuscule. Retourne « fournisseur · modèle »."""
         llm = key.config(self.settings)
-        client = AsyncOpenAI(api_key=key.key, base_url=llm.base_url, max_retries=0)
-        await self._create_with(client, llm, {"model": llm.model, "max_tokens": 64,
-                                              "messages": [{"role": "user", "content": "Réponds juste OK."}]})
+        await self._call_key(key, llm, {"model": llm.model, "max_tokens": 64,
+                                        "messages": [{"role": "user", "content": "Réponds juste OK."}]})
         return f"{llm.label} · {llm.model}"
+
+    async def list_models(self, key) -> list[str]:
+        """Modèles proposés par le fournisseur de cette clé (liste vide si elle ne peut pas être lue)."""
+        try:
+            if key.provider == "bedrock":
+                from . import bedrock
+
+                return await bedrock.list_models(key.key, key.region or "us-east-1")
+            llm = key.config(self.settings)
+            client = AsyncOpenAI(api_key=key.key, base_url=llm.base_url, max_retries=0, timeout=20)
+            page = await client.models.list()
+            return sorted({m.id.removeprefix("models/") for m in page.data})
+        except Exception as exc:
+            log.info("Liste des modèles indisponible (%s) : %s", key.label, exc)
+            return []
 
     async def ping(self) -> str:
         """Vérifie la première clé disponible (ou le client imposé)."""

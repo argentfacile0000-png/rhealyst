@@ -742,8 +742,11 @@ async def api_keys(svc: Services) -> Screen:
         else:
             state = f"{CHECK} en cours" if ai.current == k.kid else "prête"
         src = "  " + muted(".env") if k.source == "env" else ""
+        cfg = k.config(svc.settings)
+        where = f", {k.region or 'us-east-1'}" if k.provider == "bedrock" else ""
         lines.append(f"{i}. <b>{esc(k.label)}</b>  <code>{esc(k.masked)}</code>  {state}{src}")
-        btns = []
+        lines.append(f"    {muted(f'modèle {cfg.model}{where}')}")
+        btns = [(f"Modèle {i}", f"akm:{k.kid}")] if k.source == "bot" else []
         if st:
             btns.append((f"Réactiver {i}", f"akr:{k.kid}"))
         if k.source == "bot":
@@ -770,6 +773,48 @@ async def api_keys(svc: Services) -> Screen:
                             "efface-la aussi du .env du serveur.")]
     rows.append([("← Réglages", "set"), (HOME, "h")])
     return "\n".join(lines), kb(rows)
+
+
+def api_key_models(svc: Services, kid: str, models: list[str], page: int = 0) -> Screen:
+    """Choix du modèle d'une clé d'IA : liste du fournisseur (ou suggestions) + saisie libre."""
+    k = svc.pipeline.llm_keys.get(kid)
+    if k is None:
+        return "Clé introuvable.", kb([[("← Clés API", "ak")]])
+    current = k.config(svc.settings).model
+    per = 10
+    pages = max(1, (len(models) + per - 1) // per)
+    page = max(0, min(page, pages - 1))
+    lines = [title("Modèle", f"{k.label} {k.masked}"), "", row("Actuel", current)]
+    if k.provider == "bedrock":
+        lines.append(row("Région", k.region or "us-east-1"))
+        lines.append(muted("Le modèle doit être activé dans ta console AWS (Bedrock, Accès aux modèles). Si Bedrock "
+                           "demande un profil d'inférence, prends l'ID préfixé us., eu., apac. ou global."))
+    lines.append(muted(f"Page {page + 1} sur {pages}") if pages > 1 else "")
+    rows = [[(f"{CHECK} {short(m, 40)}" if m == current else short(m, 44), f"akms:{kid}:{i}")]
+            for i, m in enumerate(models[page * per:(page + 1) * per], start=page * per)]
+    pager = []
+    if page > 0:
+        pager.append(("← Précédents", f"akmp:{kid}:{page - 1}"))
+    if page < pages - 1:
+        pager.append(("Suivants →", f"akmp:{kid}:{page + 1}"))
+    if pager:
+        rows.append(pager)
+    extra = [("Autre modèle (saisir l'ID)", f"akmo:{kid}")]
+    if k.provider == "bedrock":
+        extra.append(("Changer de région", f"akg:{kid}"))
+    rows.append(extra)
+    rows.append([("← Clés API", "ak"), (HOME, "h")])
+    return "\n".join(x for x in lines if x is not None), kb(rows)
+
+
+def region_picker(kid: str = "") -> Screen:
+    from ..story.llm_keys import BEDROCK_REGIONS
+
+    rows = [[(f"{code} · {name}", f"akgs:{kid}:{i}")] for i, (code, name) in enumerate(BEDROCK_REGIONS)]
+    rows.append([("Autre région (saisir)", f"akgo:{kid}")])
+    rows.append([("Annuler", "ak")])
+    return (f"{title('Région AWS')}\n\nDans quelle région utilises-tu Bedrock ?\n"
+            + muted("C'est la région où tu as activé les modèles dans la console Bedrock.")), kb(rows)
 
 
 async def media(svc: Services) -> Screen:

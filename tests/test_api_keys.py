@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import openai
 import pytest
@@ -129,3 +131,106 @@ async def test_add_keys_from_the_bot(svc, monkeypatch):
     assert all(k.provider != "groq" for k in ring.all())
     q = await click(ctx, "set")
     assert "Clés d'IA" in q.edits[-1]
+
+
+# ---------------------------------------------------------------- AWS Bedrock et choix du modèle
+AWS = "ABSKQmVkcm9ja0FQSUtleS1hYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejEyMzQ1Njc4OTA="
+
+
+def bedrock_transport(monkeypatch, calls, deny_model=""):
+    from storyforge.story import bedrock
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.host, request.url.path, request.headers.get("authorization", "")))
+        if request.url.path.endswith("/converse"):
+            body = json.loads(request.content)
+            if deny_model and deny_model in request.url.path:
+                return httpx.Response(403, json={"message": "You don't have access to the model with the specified model ID."})
+            assert body["system"] and body["messages"][0]["role"] == "user"
+            return httpx.Response(200, json={"output": {"message": {"content": [{"text": json.dumps(STORY_JSON)}]}},
+                                             "usage": {"inputTokens": 12, "outputTokens": 34}})
+        if request.url.path == "/inference-profiles":
+            return httpx.Response(200, json={"inferenceProfileSummaries": [{"inferenceProfileId": "eu.anthropic.claude-sonnet-5-5"}]})
+        if request.url.path == "/foundation-models":
+            return httpx.Response(200, json={"modelSummaries": [{"modelId": "anthropic.claude-sonnet-5-5"},
+                                                                {"modelId": "amazon.nova-pro-v1:0"}]})
+        return httpx.Response(404, json={"message": "not found"})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(bedrock.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+
+
+def test_bedrock_key_detection_and_config(settings):
+    assert detect_provider(AWS) == "bedrock" and detect_provider("bedrock-api-key-YmVkcm9jay5hbWF6b24=") == "bedrock"
+    cfg = LLMKey(AWS, "bedrock", "bot", "amazon.nova-pro-v1:0", "eu-west-3").config(settings)
+    assert cfg.base_url == "https://bedrock-runtime.eu-west-3.amazonaws.com" and cfg.model == "amazon.nova-pro-v1:0"
+    assert LLMKey(GROQ, "groq", "bot", "openai/gpt-oss-120b").config(settings).model == "openai/gpt-oss-120b"
+
+
+async def test_story_with_bedrock_and_failover(svc, monkeypatch):
+    calls = []
+    bedrock_transport(monkeypatch, calls, deny_model="opus")
+    svc.settings.openai_api_key = ""
+    ring = svc.pipeline.llm_keys
+    await db.kv_set("llm_keys", [])
+    await ring.load()
+    await ring.add(AWS, "bedrock", model="anthropic.claude-opus-5-5", region="eu-west-3")  # modèle non activé
+    await ring.add("bedrock-api-key-c2Vjb25kLWtleS1hYmNkZWZnaGlq", "bedrock", model="eu.anthropic.claude-sonnet-5-5",
+                   region="eu-west-3")
+    gen = svc.pipeline.stories
+    gen._client = None
+    story = await gen.generate(language="fr", seconds_per_part=6)
+    assert story.title and story.model == "eu.anthropic.claude-sonnet-5-5"
+    converse = [c for c in calls if c[2].endswith("/converse")]
+    assert converse[0][1] == "bedrock-runtime.eu-west-3.amazonaws.com" and converse[0][3] == f"Bearer {AWS}"
+    assert "eu.anthropic.claude-sonnet-5-5" in converse[-1][2]
+    first = ring.get(LLMKey(AWS, "bedrock", "bot").kid)
+    assert ring.status(first)["reason"] == "modèle non activé"
+
+
+async def test_add_aws_key_and_choose_models_from_the_bot(svc, monkeypatch):
+    calls = []
+    bedrock_transport(monkeypatch, calls)
+    ctx, bot = make_ctx(svc)
+    pinged = []
+
+    async def ping_key(key):
+        pinged.append((key.provider, key.model))
+        return f"{key.label} · {key.model}"
+
+    monkeypatch.setattr(svc.pipeline.stories, "ping_key", ping_key)
+    await click(ctx, "aka")
+    m = await type_text(ctx, AWS)
+    assert m.deleted and ctx.user_data["aws_key"] == AWS
+    q = await click(ctx, "akgs::2")  # eu-west-3, Paris
+    k = next(x for x in svc.pipeline.llm_keys.all() if x.provider == "bedrock")
+    assert k.region == "eu-west-3" and "aws_key" not in ctx.user_data
+    models = ctx.user_data["models"][k.kid]
+    assert models[0] == "anthropic.claude-sonnet-5-5" and "eu.anthropic.claude-sonnet-5-5" in models
+    await click(ctx, f"akms:{k.kid}:{models.index('eu.anthropic.claude-sonnet-5-5')}")
+    assert svc.pipeline.llm_keys.get(k.kid).model == "eu.anthropic.claude-sonnet-5-5"
+    assert any("Modèle choisi et vérifié" in t for t in bot.sent)
+
+    # Saisie libre d'un modèle, changement de région
+    await click(ctx, f"akmo:{k.kid}")
+    m = await type_text(ctx, "pas un modèle !")
+    assert "invalide" in m.replies[-1]
+    await type_text(ctx, "amazon.nova-pro-v1:0")
+    assert svc.pipeline.llm_keys.get(k.kid).model == "amazon.nova-pro-v1:0"
+    await click(ctx, f"akg:{k.kid}")
+    await click(ctx, f"akgo:{k.kid}")
+    await type_text(ctx, "us-east-2")
+    assert svc.pipeline.llm_keys.get(k.kid).region == "us-east-2"
+
+    # Choix du modèle d'une clé Groq : liste du fournisseur
+    async def list_models(key):
+        return ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "whisper-large-v3"]
+
+    monkeypatch.setattr(svc.pipeline.stories, "list_models", list_models)
+    g = await svc.pipeline.llm_keys.add(GROQ, "groq")
+    q = await click(ctx, f"akm:{g.kid}")
+    assert "Modèle" in q.edits[-1] and "llama-3.3-70b-versatile" in q.edits[-1]
+    await click(ctx, f"akms:{g.kid}:1")
+    assert svc.pipeline.llm_keys.get(g.kid).model == "openai/gpt-oss-120b"
+    q = await click(ctx, "ak")
+    assert "modèle openai/gpt-oss-120b" in q.edits[-1] and "modèle amazon.nova-pro-v1:0, us-east-2" in q.edits[-1]

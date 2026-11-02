@@ -21,12 +21,29 @@ PROVIDERS: dict[str, dict] = {
     **LLM_PROVIDERS,
     "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1",
                    "model": "meta-llama/llama-3.3-70b-instruct:free", "key": "", "env": "", "free": True},
+    # Amazon Bedrock (clé API Bedrock) : API Converse, valable pour tous les modèles du catalogue Bedrock
+    "bedrock": {"label": "AWS Bedrock", "base_url": "", "model": "anthropic.claude-sonnet-5-5",
+                "key": "", "env": "", "free": False},
 }
+
+# Modèles proposés quand la liste du fournisseur ne peut pas être lue (« Autre modèle » permet tout ID).
+SUGGESTED_MODELS: dict[str, list[str]] = {
+    "gemini": ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-flash-lite-latest"],
+    "groq": ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+    "openai": ["gpt-4.1", "gpt-4.1-mini", "gpt-5-mini", "gpt-5"],
+    "openrouter": ["meta-llama/llama-3.3-70b-instruct:free", "openai/gpt-oss-120b", "deepseek/deepseek-chat"],
+    "bedrock": ["anthropic.claude-sonnet-5-5", "anthropic.claude-haiku-5-5", "anthropic.claude-opus-5-5",
+                "amazon.nova-pro-v1:0", "meta.llama3-3-70b-instruct-v1:0", "openai.gpt-oss-120b-1:0"],
+}
+BEDROCK_REGIONS = [("us-east-1", "Virginie"), ("us-west-2", "Oregon"), ("eu-west-3", "Paris"),
+                   ("eu-central-1", "Francfort"), ("eu-west-1", "Irlande")]
 INVALID_FOR = 10 * 365 * 86400  # clé invalide : écartée jusqu'à réactivation manuelle
 
 
 def detect_provider(key: str) -> str | None:
     key = key.strip()
+    if key.startswith(("ABSK", "bedrock-api-key-")):
+        return "bedrock"
     if key.startswith("AIza"):
         return "gemini"
     if key.startswith("gsk_"):
@@ -43,6 +60,8 @@ class LLMKey:
     key: str
     provider: str
     source: str  # env | bot
+    model: str = ""  # modèle choisi (vide = modèle par défaut du fournisseur)
+    region: str = ""  # région AWS (Bedrock)
 
     @property
     def kid(self) -> str:
@@ -58,12 +77,16 @@ class LLMKey:
 
     def config(self, settings: Settings) -> LLMConfig:
         p = PROVIDERS[self.provider]
+        if self.provider == "bedrock":
+            region = self.region or "us-east-1"
+            return LLMConfig("bedrock", p["label"], f"https://bedrock-runtime.{region}.amazonaws.com",
+                             self.model or p["model"], self.key, "", False)
         if self.provider == "openai":
-            model = settings.llm_model or settings.openai_model
+            model = self.model or settings.llm_model or settings.openai_model
             base = settings.openai_base_url or p["base_url"]
         else:
             same = (settings.llm_provider or "auto").lower() == self.provider
-            model = settings.llm_model if (settings.llm_model and same) else p["model"]
+            model = self.model or (settings.llm_model if (settings.llm_model and same) else p["model"])
             base = p["base_url"]
         return LLMConfig(self.provider, p["label"], base, model, self.key, p.get("env") or "", p["free"])
 
@@ -96,7 +119,8 @@ class LLMKeyRing:
 
     def all(self) -> list[LLMKey]:
         seen, out = set(), []
-        for k in [LLMKey(d["key"], d["provider"], "bot") for d in self._bot] + self.env_keys():
+        for k in [LLMKey(d["key"], d["provider"], "bot", d.get("model", ""), d.get("region", "")) for d in self._bot] \
+                + self.env_keys():
             if k.key not in seen:
                 seen.add(k.key)
                 out.append(k)
@@ -112,14 +136,33 @@ class LLMKeyRing:
             keys.sort(key=lambda k: k.kid != self.current)
         return keys
 
-    async def add(self, key: str, provider: str) -> LLMKey:
+    def get(self, kid: str) -> LLMKey | None:
+        return next((k for k in self.all() if k.kid == kid), None)
+
+    async def update(self, kid: str, **fields: str) -> LLMKey | None:
+        """Change le modèle ou la région d'une clé du dashboard."""
+        for d in self._bot:
+            if LLMKey(d["key"], d["provider"], "bot").kid == kid:
+                d.update({k: v for k, v in fields.items() if k in ("model", "region")})
+                await db.kv_set(KV_KEYS, self._bot)
+                self._cooldown.pop(kid, None)  # nouveau modèle : on lui redonne sa chance
+                await db.kv_set(KV_COOLDOWN, self._cooldown)
+                return self.get(kid)
+        return None
+
+    async def add(self, key: str, provider: str, *, model: str = "", region: str = "") -> LLMKey:
         key = key.strip()
         if not any(d["key"] == key for d in self._bot):
-            self._bot.append({"key": key, "provider": provider})
+            entry = {"key": key, "provider": provider}
+            if model:
+                entry["model"] = model
+            if region:
+                entry["region"] = region
+            self._bot.append(entry)
             await db.kv_set(KV_KEYS, self._bot)
         self._cooldown.pop(LLMKey(key, provider, "bot").kid, None)
         await db.kv_set(KV_COOLDOWN, self._cooldown)
-        return LLMKey(key, provider, "bot")
+        return LLMKey(key, provider, "bot", model, region)
 
     async def remove(self, kid: str) -> None:
         self._bot = [d for d in self._bot if LLMKey(d["key"], d["provider"], "bot").kid != kid]

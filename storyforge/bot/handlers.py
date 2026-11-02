@@ -454,7 +454,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await video_action(update, context, head, cid)
     elif head in ("var", "vua", "vsc", "vsq", "vsu", "vsp", "vsx"):
         await video_extra_action(update, context, head, parts)
-    elif head in ("aka", "akd", "aku", "akr"):
+    elif head in ("aka", "akd", "aku", "akr", "akm", "akmp", "akms", "akmo", "akg", "akgs", "akgo"):
         await api_key_action(update, context, head, parts)
     elif head in ("vm", "vml"):
         v = await svc.get_video(cid)
@@ -695,6 +695,14 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await show(update, context, await screens.ytdlp_settings(svc), new=True)
         elif kind == "ytdlp_cookies":
             raise ValueError("Envoie le fichier cookies.txt lui-même (trombone, Fichier)")
+        elif kind == "api_key_model":
+            if not re.fullmatch(r"[\w.:/\-@]{2,160}", text):
+                raise ValueError("Identifiant de modèle invalide")
+            await _set_model(update, context, state["kid"], text)
+        elif kind == "aws_region":
+            if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-\d", text.strip()):
+                raise ValueError("Région invalide (exemple : eu-west-3)")
+            await _set_region(update, context, state.get("kid", ""), text.strip())
         elif kind == "api_key":
             await receive_api_key(update, context, text)
         elif kind == "site_verify":
@@ -944,7 +952,7 @@ async def api_key_action(update: Update, context: ContextTypes.DEFAULT_TYPE, hea
     kid = parts[1] if len(parts) > 1 else ""
     if head == "aka":
         await q.answer()
-        await prompt(update, context, "<b>Ajouter une clé</b>\n\nColle une clé d'IA (Gemini, Groq, OpenAI, OpenRouter) "
+        await prompt(update, context, "<b>Ajouter une clé</b>\n\nColle une clé d'IA (Gemini, Groq, OpenAI, OpenRouter, AWS Bedrock) "
                      "ou ElevenLabs : je reconnais le fournisseur, je la vérifie puis je supprime ton message.\n\n"
                      "<i>Gratuit : Gemini sur aistudio.google.com/apikey, Groq sur console.groq.com/keys.</i>",
                      {"kind": "api_key"})
@@ -959,7 +967,118 @@ async def api_key_action(update: Update, context: ContextTypes.DEFAULT_TYPE, hea
     elif head == "akr":
         await ring.reactivate(kid)
         await q.answer("Clé réactivée")
+    elif head in ("akm", "akmp"):
+        key = ring.get(kid)
+        if key is None:
+            await q.answer("Clé introuvable", show_alert=True)
+            return
+        await q.answer("Lecture des modèles…" if head == "akm" else None)
+        cache = context.user_data.setdefault("models", {})
+        if head == "akm" or kid not in cache:
+            cache[kid] = await _models_for(svc, key)
+        page = int(parts[2]) if head == "akmp" and len(parts) > 2 and parts[2].isdigit() else 0
+        await show(update, context, screens.api_key_models(svc, kid, cache[kid], page))
+        return
+    elif head == "akms":
+        models = context.user_data.get("models", {}).get(kid) or []
+        idx = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else -1
+        if not 0 <= idx < len(models):
+            await q.answer("Rouvre la liste des modèles", show_alert=True)
+            return
+        await q.answer(f"Modèle : {models[idx]}"[:190])
+        await _set_model(update, context, kid, models[idx])
+        return
+    elif head == "akmo":
+        await q.answer()
+        await prompt(update, context, "<b>Autre modèle</b>\n\nEnvoie l'identifiant exact du modèle.\n<i>Exemples : "
+                     "gemini-2.5-pro, gpt-4.1-mini, anthropic.claude-sonnet-5-5, eu.anthropic.claude-sonnet-5-5</i>",
+                     {"kind": "api_key_model", "kid": kid})
+        return
+    elif head == "akg":
+        await q.answer()
+        await show(update, context, screens.region_picker(kid))
+        return
+    elif head == "akgs":
+        from ..story.llm_keys import BEDROCK_REGIONS
+
+        idx = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else -1
+        if not 0 <= idx < len(BEDROCK_REGIONS):
+            await q.answer()
+            return
+        await q.answer()
+        await _set_region(update, context, kid, BEDROCK_REGIONS[idx][0])
+        return
+    elif head == "akgo":
+        await q.answer()
+        await prompt(update, context, "<b>Région AWS</b>\n\nEnvoie le code de la région.\n<i>Exemples : us-east-2, "
+                     "eu-north-1, ap-northeast-1</i>", {"kind": "aws_region", "kid": kid})
+        return
     await show(update, context, await screens.api_keys(svc))
+
+
+def _rank_models(key, listed: list[str]) -> list[str]:
+    """Suggestions connues en tête, puis les modèles gratuits, puis le reste (suggestions seules si liste vide)."""
+    from ..story.llm_keys import SUGGESTED_MODELS
+
+    suggested = SUGGESTED_MODELS.get(key.provider, [])
+    if not listed:
+        return suggested
+    first = [m for m in suggested if m in listed]
+    free = [m for m in listed if m.endswith(":free") and m not in first]
+    return first + free + [m for m in listed if m not in first and m not in free]
+
+
+async def _models_for(svc: Services, key) -> list[str]:
+    return _rank_models(key, await svc.pipeline.stories.list_models(key))
+
+
+async def _set_model(update: Update, context: ContextTypes.DEFAULT_TYPE, kid: str, model: str) -> None:
+    from ..story.generator import KeyFailure
+
+    svc = svc_of(context)
+    key = await svc.pipeline.llm_keys.update(kid, model=model)
+    if key is None:
+        raise ValueError("Clé introuvable")
+    context.user_data.pop("await", None)
+    try:
+        note = f"✓ Modèle choisi et vérifié : {await svc.pipeline.stories.ping_key(key)}"
+    except KeyFailure as exc:
+        note = f"! Modèle enregistré, mais le test a échoué ({exc.reason}) : {exc}"[:600]
+    except Exception as exc:
+        note = f"! Modèle enregistré, test impossible : {exc}"[:400]
+    await context.bot.send_message(update.effective_chat.id, note)
+    await show(update, context, await screens.api_keys(svc), new=True)
+
+
+async def _set_region(update: Update, context: ContextTypes.DEFAULT_TYPE, kid: str, region: str) -> None:
+    """Région d'une clé AWS : termine l'ajout d'une nouvelle clé, ou change celle d'une clé existante."""
+    from ..story import bedrock
+
+    svc = svc_of(context)
+    ring = svc.pipeline.llm_keys
+    chat = update.effective_chat.id
+    context.user_data.pop("await", None)
+    listed: list[str] = []
+    if not kid:
+        key = context.user_data.pop("aws_key", None)
+        if not key:
+            await context.bot.send_message(chat, "Renvoie ta clé AWS : Réglages, Clés API, Ajouter une clé.")
+            return
+        try:
+            listed = await bedrock.list_models(key, region)
+        except bedrock.BedrockError as exc:
+            if exc.reason == "invalide":
+                await context.bot.send_message(chat, f"✕ {exc}")
+                return
+        kid = (await ring.add(key, "bedrock", region=region)).kid
+        await db.log_event(f"Clé AWS Bedrock ajoutée ({region})", "success")
+        await context.bot.send_message(chat, f"✓ Clé AWS Bedrock ajoutée ({region}). Choisis maintenant le modèle.")
+    else:
+        await ring.update(kid, region=region)
+    key = ring.get(kid)
+    cache = context.user_data.setdefault("models", {})
+    cache[kid] = _rank_models(key, listed) if listed else await _models_for(svc, key)
+    await show(update, context, screens.api_key_models(svc, kid, cache[kid]), new=True)
 
 
 async def receive_api_key(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
@@ -974,6 +1093,13 @@ async def receive_api_key(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         pass
     key = text.strip()
     chat = update.effective_chat.id
+    if detect_provider(key) == "bedrock":
+        if not re.fullmatch(r"[A-Za-z0-9+/=_\-.:%&]{20,4000}", key):
+            raise ValueError("Clé AWS Bedrock illisible : colle-la telle que la console AWS l'affiche")
+        context.user_data["aws_key"] = key
+        context.user_data.pop("await", None)
+        await show(update, context, screens.region_picker(""), new=True)
+        return
     if ELEVEN_RE.fullmatch(key):
         try:
             sub = await svc.pipeline.tts.subscription(api_key=key)
@@ -987,7 +1113,7 @@ async def receive_api_key(update: Update, context: ContextTypes.DEFAULT_TYPE, te
         provider = detect_provider(key)
         if provider is None or not re.fullmatch(r"[A-Za-z0-9_\-.]{20,200}", key):
             raise ValueError("Clé non reconnue. Formats acceptés : Gemini (AIza…), Groq (gsk_…), OpenAI (sk-…), "
-                             "OpenRouter (sk-or-…), ElevenLabs (sk_…)")
+                             "OpenRouter (sk-or-…), AWS Bedrock (ABSK… ou bedrock-api-key-…), ElevenLabs (sk_…)")
         candidate = LLMKey(key, provider, "bot")
         try:
             model = await svc.pipeline.stories.ping_key(candidate)

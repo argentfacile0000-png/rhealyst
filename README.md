@@ -143,7 +143,10 @@ Seuls les comptes listés dans `TELEGRAM_ADMIN_IDS` peuvent utiliser le bot.
 ### Clés API (IA et ElevenLabs) depuis Telegram
 
 Réglages → **Clés API** → Ajouter une clé : colle une clé Gemini (`AIza…`), Groq (`gsk_…`), OpenAI (`sk-…`),
-OpenRouter (`sk-or-…`) ou ElevenLabs (`sk_…`). Le bot reconnaît le fournisseur, vérifie la clé et supprime ton
+OpenRouter (`sk-or-…`), AWS Bedrock (`ABSK…` ou `bedrock-api-key-…`, avec choix de la région) ou ElevenLabs (`sk_…`).
+Bouton **Modèle** sur chaque clé : liste des modèles du fournisseur (pour Bedrock, ceux de ta région : Claude, Llama,
+Nova, Mistral, gpt-oss… à activer d'abord dans la console Bedrock) ou n'importe quel identifiant saisi à la main ; le
+modèle est testé aussitôt. Le bot reconnaît le fournisseur, vérifie la clé et supprime ton
 message. Mets-en plusieurs : elles sont essayées dans l'ordre (flèche ↑ pour réordonner) et si l'une échoue
 (quota, limite, clé invalide), la suivante prend le relais et tu es prévenu. Les clés déjà présentes dans le
 `.env` sont reprises automatiquement ; le `.env` n'a plus besoin que du token Telegram et de ton identifiant.
