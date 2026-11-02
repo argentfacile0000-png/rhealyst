@@ -162,12 +162,12 @@ class Services:
         prefix = "Vidéo longue" if kind == VideoFormat.HORIZONTAL else "Génération"
         return self.jobs.submit("generate", label or prefix, run, channel_id=channel_id, tag=kind)
 
-    def enqueue_publish(self, video_id: int, channel_id: int | None = None) -> Job | None:
+    def enqueue_publish(self, video_id: int, channel_id: int | None = None, tiktok_mode: str | None = None) -> Job | None:
         if self.jobs.count(kind="publish", video_id=video_id):
             return None
 
         async def run() -> None:
-            await self.pipeline.publish(video_id)
+            await self.pipeline.publish(video_id, tiktok_mode=tiktok_mode)
 
         return self.jobs.submit("publish", f"Publication #{video_id}", run, channel_id=channel_id, video_id=video_id)
 
@@ -630,6 +630,34 @@ class Services:
         if not code or not state:
             raise PublisherError("Adresse invalide : elle doit contenir code= et state=")
         return await self.complete_oauth(state, code)
+
+    # ------------------------------------------------------------------ TikTok : réglages de publication
+    async def tiktok_creator(self, channel_id: int) -> dict:
+        """Infos du créateur TikTok (rafraîchit le jeton si besoin)."""
+        ch = await self.get_channel(channel_id)
+        if ch is None or not ch.tiktok_linked:
+            raise PublisherError("Compte TikTok non connecté")
+        s = self.settings
+        creds, changed = await tiktok.refresh_if_needed(s.tiktok_client_key, s.tiktok_client_secret,
+                                                        ch.tiktok_credentials or {})
+        if changed:
+            await self.update_channel(channel_id, tiktok_credentials=creds)
+        return await tiktok.fetch_creator_info(creds["access_token"])
+
+    async def save_tiktok_post(self, channel_id: int, settings: dict, creator: dict, *, auto: bool) -> list[str]:
+        """Enregistre les réglages choisis sur l'écran TikTok. Retourne les erreurs (rien n'est enregistré alors)."""
+        errors = tiktok.check_post_settings(settings, creator)
+        if errors:
+            return errors
+        clean = {k: bool(settings.get(k)) for k in ("comment", "duet", "stitch", "disclose", "brand_organic",
+                                                     "brand_content")}
+        clean.update(privacy=settings["privacy"], consented_at=utcnow().isoformat(timespec="seconds"),
+                     nickname=str(creator.get("creator_nickname") or ""))
+        ch = await self.update_channel(channel_id, tiktok_post=clean, tiktok_mode="direct" if auto else "draft")
+        mode = "publication automatique" if auto else "envoi en brouillon"
+        await db.log_event(f"{ch.name} : réglages de publication TikTok enregistrés ({mode}, "
+                           f"{tiktok.PRIVACY_LABELS.get(clean['privacy'], clean['privacy'])})", "success", channel_id)
+        return []
 
     async def unlink(self, channel_id: int, platform: str) -> Channel:
         if platform not in PLATFORM_LABELS:

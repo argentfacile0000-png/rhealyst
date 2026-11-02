@@ -244,6 +244,9 @@ async def accounts(svc: Services, cid: int) -> Screen:
         f"Instagram  {state('instagram', ch.instagram_linked, ch.instagram_account, ch.instagram_enabled)}",
         "",
     ]
+    if ch.tiktok_linked and not ch.tiktok_post:
+        lines += [f"{CROSS} TikTok : choisis tes <b>réglages de publication</b> (visibilité, interactions) sur la "
+                  "page de connexion, sinon les vidéos partent en brouillon ou ne sont pas publiées.", ""]
     rows: list[list] = []
     if svc.portal_available():
         lines.append("Ouvre la page de connexion, choisis la plateforme et accepte les autorisations.")
@@ -801,6 +804,8 @@ async def platform_guide(svc: Services, platform: str) -> Screen:
             "(<i>user.info.profile, user.info.stats, video.list, minis…</i>) : un scope inutile bloque la revue.",
             "4. Copie le <b>Client key</b> et le <b>Client secret</b>, puis appuie sur <b>Saisir les clés</b>.",
             "5. Envoie l'app en revue (<i>Submit for review</i>).",
+            *(["6. Connecte ton compte (Chaîne, Comptes), puis <b>Réglages de publication</b> : choisis la "
+               "visibilité et coche <i>Publier automatiquement</i>."] if direct else []),
             "",
             "<b>Vérification du site</b>, si TikTok la demande : choisis <b>URL prefix</b> (pas <i>Domain</i> : "
             "l'adresse sslip.io n'accepte pas d'enregistrement DNS), saisis "

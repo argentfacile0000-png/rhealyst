@@ -124,7 +124,8 @@ def _check(resp: httpx.Response) -> dict:
         hints = {
             "spam_risk_too_many_posts": "trop de publications aujourd'hui sur ce compte",
             "spam_risk_user_banned_from_posting": "compte bloqué pour la publication",
-            "unaudited_client_can_only_post_to_private_accounts": "app non auditée : passe le compte en privé ou utilise le mode brouillon",
+            "unaudited_client_can_only_post_to_private_accounts": "app pas encore auditée par TikTok : seule la "
+            "visibilité « Moi seul » est possible pour l'instant (ou le mode brouillon)",
             "privacy_level_option_mismatch": "niveau de visibilité non autorisé pour ce compte",
             "access_token_invalid": "jeton invalide, relie le compte",
             "scope_not_authorized": "autorisation manquante (scopes), relie le compte",
@@ -150,6 +151,55 @@ async def creator_info(client: httpx.AsyncClient, headers: dict) -> dict:
     return _check(resp)
 
 
+async def fetch_creator_info(access_token: str) -> dict:
+    """Pseudo, avatar, visibilités autorisées, interactions désactivées et durée maximale du créateur."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json; charset=UTF-8"}
+        return await creator_info(client, headers)
+
+
+PRIVACY_LABELS = {
+    "PUBLIC_TO_EVERYONE": "Tout le monde",
+    "FOLLOWER_OF_CREATOR": "Abonnés",
+    "MUTUAL_FOLLOW_FRIENDS": "Amis",
+    "SELF_ONLY": "Moi seul",
+}
+
+
+def check_post_settings(settings: dict, creator: dict) -> list[str]:
+    """Erreurs bloquantes des réglages choisis (règles de publication de TikTok)."""
+    errors = []
+    if settings.get("privacy") not in (creator.get("privacy_level_options") or []):
+        errors.append("Choisis la visibilité des vidéos.")
+    if settings.get("disclose") and not (settings.get("brand_organic") or settings.get("brand_content")):
+        errors.append("Contenu commercial : indique s'il s'agit de ta marque, de contenu de marque, ou des deux.")
+    if settings.get("brand_content") and settings.get("privacy") == "SELF_ONLY":
+        errors.append("Un contenu de marque ne peut pas être privé : choisis une autre visibilité.")
+    return errors
+
+
+def post_info_from(settings: dict | None, creator: dict, caption: str) -> dict[str, Any]:
+    """Paramètres de publication directe, à partir des réglages choisis par le créateur."""
+    if not settings or not settings.get("consented_at"):
+        raise PublisherError("Choisis d'abord tes réglages de publication TikTok : page Comptes de la chaîne, "
+                             "TikTok, Réglages de publication")
+    errors = check_post_settings(settings, creator)
+    if errors:
+        raise PublisherError("Réglages de publication TikTok à revoir : " + " ".join(errors))
+    disclose = bool(settings.get("disclose"))
+    return {
+        "title": caption[:2200],
+        "privacy_level": settings["privacy"],
+        "disable_comment": bool(creator.get("comment_disabled")) or not settings.get("comment"),
+        "disable_duet": bool(creator.get("duet_disabled")) or not settings.get("duet"),
+        "disable_stitch": bool(creator.get("stitch_disabled")) or not settings.get("stitch"),
+        "brand_content_toggle": disclose and bool(settings.get("brand_content")),
+        "brand_organic_toggle": disclose and bool(settings.get("brand_organic")),
+        "video_cover_timestamp_ms": 1500,
+        "is_aigc": True,  # contenu généré par IA (voix) : étiquette obligatoire
+    }
+
+
 def chunk_plan(size: int) -> tuple[int, int]:
     """(chunk_size, total_chunk_count) selon les règles de l'API TikTok."""
     if size <= MAX_SINGLE:
@@ -168,6 +218,10 @@ def effective_mode(creds: dict, mode: str) -> str:
 
 async def publish(creds: dict, req: PublishRequest, *, username: str = "") -> PublishResult:
     req.mode = effective_mode(creds, req.mode)
+    if req.mode != "draft" and not (req.tiktok or {}).get("consented_at"):
+        # Le créateur n'a pas encore choisi ses réglages de publication : jamais de publication directe sans eux.
+        log.warning("Réglages de publication TikTok non choisis : envoi en brouillon")
+        req.mode = "draft"
     token = creds.get("access_token")
     if not token:
         raise PublisherError("Compte TikTok non lié")
@@ -182,22 +236,11 @@ async def publish(creds: dict, req: PublishRequest, *, username: str = "") -> Pu
                                             json={"source_info": source}))
         else:
             info = await creator_info(client, headers)
-            options = info.get("privacy_level_options") or ["SELF_ONLY"]
-            if req.privacy in options:
-                privacy = req.privacy
-            else:  # visibilité demandée indisponible : on prend la plus ouverte autorisée
-                prefs = ["PUBLIC_TO_EVERYONE", "FOLLOWER_OF_CREATOR", "MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"]
-                privacy = next((p for p in prefs if p in options), options[0])
-                log.warning("Visibilité TikTok %s indisponible, utilisation de %s", req.privacy, privacy)
-            post_info: dict[str, Any] = {
-                "title": req.caption[:2200],
-                "privacy_level": privacy,
-                "disable_duet": False,
-                "disable_comment": False,
-                "disable_stitch": False,
-                "video_cover_timestamp_ms": 1500,
-                "is_aigc": True,  # contenu généré par IA (voix) : étiquette obligatoire
-            }
+            max_seconds = info.get("max_video_post_duration_sec")
+            if max_seconds and req.duration and req.duration > max_seconds:
+                raise PublisherError(f"Vidéo trop longue pour ce compte TikTok ({int(req.duration)} s, "
+                                     f"maximum {max_seconds} s) : découpe-la en parties")
+            post_info = post_info_from(req.tiktok, info, req.caption)
             init = _check(await client.post(f"{API}/v2/post/publish/video/init/", headers=headers,
                                             json={"post_info": post_info, "source_info": source}))
 

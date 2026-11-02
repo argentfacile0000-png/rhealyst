@@ -266,6 +266,13 @@ Les vidéos sont déclarées comme contenant des médias synthétiques (`contain
 3. Connecte le compte depuis la page Comptes de la chaîne.
 4. Optionnel : réglage « Pseudo TikTok » de la chaîne, pour que les liens des vidéos soient corrects.
 
+**Publication automatique (Direct Post).** Bot : Réglages → Plateformes → TikTok → « Passer en publication directe »
+(scope `video.publish`), puis connecte le compte et ouvre **Réglages de publication** depuis la page Comptes. Cet écran
+suit les règles de TikTok : compte affiché, visibilité à choisir (aucune valeur par défaut), commentaires, duos et
+stitchs, divulgation du contenu commercial, consentement (Music Usage Confirmation), aperçu de la vidéo. Coche
+« Publier automatiquement » : chaque nouvelle vidéo part ensuite seule, aux horaires de la chaîne, avec ces réglages.
+Sans ces réglages, StoryForge n'effectue jamais de publication directe : les vidéos partent en brouillon.
+
 > **Important** : tant que ton app TikTok n'a pas passé l'audit de TikTok, la publication directe n'est autorisée
 > qu'en **privé** (`SELF_ONLY`). Deux solutions : faire auditer l'app, ou passer la chaîne en mode **Brouillon** :
 > la vidéo arrive dans ta boîte de réception TikTok et tu la publies en un tap (pratique aussi pour ajouter un son tendance).

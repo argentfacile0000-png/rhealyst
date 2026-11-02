@@ -133,6 +133,10 @@ def alert(kind: str, text: str) -> str:
     return f'<div role="status" class="mb-8 p-4 rounded-lg border {ALERT[kind]}"><p class="text-sm">{text}</p></div>'
 
 
+TT_PRIVACY = {"PUBLIC_TO_EVERYONE": "tout le monde", "FOLLOWER_OF_CREATOR": "abonnés",
+              "MUTUAL_FOLLOW_FRIENDS": "amis", "SELF_ONLY": "moi seul"}
+
+
 def _platform_card(platform: str, ch: Channel, token: str, *, problem: str | None, automatic: bool) -> str:
     meta = PLATFORMS[platform]
     linked = getattr(ch, f"{platform}_linked")
@@ -171,12 +175,20 @@ def _platform_card(platform: str, ch: Channel, token: str, *, problem: str | Non
             f'    <a href="/connect/{e(token)}/{platform}" class="{BTN_PRIMARY if not linked else BTN_SECONDARY}">'
             f'{"Changer de compte" if linked else "Se connecter avec " + meta["name"]}</a>',
         ]
+        if linked and platform == "tiktok":
+            body.append(f'    <a href="/connect/{e(token)}/tiktok/settings" class="{BTN_PRIMARY}">Réglages de publication</a>')
         if linked:
             body.append(
                 f'    <form method="post" action="/connect/{e(token)}/{platform}/disconnect">'
                 f'<button type="submit" class="{BTN_GHOST}">Déconnecter</button></form>'
             )
         body.append('  </div>')
+        if linked and platform == "tiktok":
+            post = ch.tiktok_post or {}
+            state = ("Réglages de publication à choisir avant la publication automatique." if not post else
+                     ("Publication automatique" if ch.tiktok_mode == "direct" else "Envoi en brouillon")
+                     + f", visibilité : {TT_PRIVACY.get(post.get('privacy', ''), post.get('privacy', ''))}.")
+            body.append(f'  <p class="text-sm mt-4">{e(state)}</p>')
         body.append(f'  <p class="text-xs text-muted mt-4 leading-relaxed">{e(meta["hint"])}</p>')
         if not automatic:
             body.append(
@@ -326,3 +338,120 @@ def landing(base: str) -> HTMLResponse:
         f'<p class="text-sm text-muted">{links}</p>'
     )
     return page("StoryForge", body, subtitle="Outil privé de publication", note="StoryForge")
+
+
+# ---------------------------------------------------------------- TikTok : écran de publication (règles TikTok)
+MUSIC_POLICY = "https://www.tiktok.com/legal/page/global/music-usage-confirmation/en"
+BC_POLICY = "https://www.tiktok.com/legal/page/global/bc-policy/en"
+TT_FLASH = {
+    "saved": ("success", "Réglages enregistrés."),
+    "published": ("success", "Publication lancée. La vidéo peut mettre quelques minutes à apparaître sur ton profil TikTok."),
+    "draft": ("success", "Brouillon envoyé : ouvre l'app TikTok, boîte de réception, pour le finaliser et le publier."),
+}
+
+
+def _check_row(name: str, label: str, *, checked: bool, disabled: bool, note: str = "") -> str:
+    attrs = (" checked" if checked and not disabled else "") + (" disabled" if disabled else "")
+    extra = f'<span class="block text-xs text-muted">{e(note)}</span>' if note else ""
+    return (f'<label class="flex items-start gap-3 py-2 {"opacity-60" if disabled else "cursor-pointer"}">'
+            f'<input type="checkbox" name="{name}" value="1" class="mt-1 w-4 h-4"{attrs}>'
+            f'<span class="text-sm">{e(label)}{extra}</span></label>')
+
+
+def tiktok_settings(ch: Channel, token: str, *, creator: dict | None, settings: dict, auto: bool,
+                    preview: dict | None, labels: dict[str, str], errors: list[str] | None = None,
+                    flash: str = "", problem: str = "") -> HTMLResponse:
+    back = f'<a href="/connect/{e(token)}" class="{BTN_GHOST}">← Comptes</a>'
+    parts = [
+        '<p class="text-sm text-muted mb-3">TikTok</p>',
+        '<h1 class="text-3xl font-bold tracking-tight mb-4">Réglages de publication</h1>',
+        f'<p class="text-muted leading-relaxed mb-8 max-w-xl">Chaîne <b>{e(ch.name)}</b>. Choisis comment tes vidéos '
+        "sont publiées sur TikTok. StoryForge applique ces réglages à chaque publication.</p>",
+    ]
+    if flash in TT_FLASH:
+        parts.append(alert(*TT_FLASH[flash]))
+    for err in errors or []:
+        parts.append(alert("error", e(err)))
+    if problem or creator is None:
+        parts.append(alert("error", e(problem or "Impossible de lire ton compte TikTok.")))
+        parts.append(f'<div class="mt-6">{back}</div>')
+        return page("Publication TikTok", "\n".join(parts), subtitle="Publication TikTok")
+
+    avatar = creator.get("creator_avatar_url") or ""
+    nickname = creator.get("creator_nickname") or creator.get("creator_username") or "ton compte"
+    username = creator.get("creator_username") or ""
+    img = (f'<img src="{e(avatar)}" alt="" class="w-12 h-12 rounded-full object-cover bg-muted">' if avatar
+           else '<div class="w-12 h-12 rounded-full bg-muted"></div>')
+    parts.append(
+        '<section class="p-6 rounded-lg border border-default bg-card mb-6"><div class="flex items-center gap-4">'
+        f'{img}<div><p class="text-sm text-muted">Publié sur</p><p class="font-semibold">{e(nickname)}'
+        f'{" · @" + e(username) if username else ""}</p></div></div></section>'
+    )
+
+    max_s = creator.get("max_video_post_duration_sec")
+    too_long = bool(preview and max_s and preview["duration"] > max_s)
+    if preview:
+        parts.append(
+            '<section class="p-6 rounded-lg border border-default bg-card mb-6">'
+            '<h2 class="font-semibold tracking-tight mb-1">Aperçu de la prochaine vidéo</h2>'
+            f'<p class="text-sm text-muted mb-4">{e(preview["title"])} · {int(preview["duration"])} s</p>'
+            f'<video src="{e(preview["url"])}" controls playsinline preload="metadata" '
+            'class="w-full max-w-xs aspect-[9/16] rounded-md bg-muted"></video>'
+            f'<p class="text-xs text-muted mt-3">Légende : {e(preview["caption"])}</p>'
+            + (f'<p class="text-sm text-red-600 mt-3">Vidéo trop longue pour ce compte (maximum {int(max_s)} s).</p>'
+               if too_long else "")
+            + "</section>"
+        )
+
+    options = creator.get("privacy_level_options") or []
+    chosen = settings.get("privacy") if settings.get("privacy") in options else ""
+    opts = ['<option value="" disabled' + (" selected" if not chosen else "") + ">Choisir la visibilité…</option>"]
+    for o in options:
+        opts.append(f'<option value="{e(o)}"{" selected" if o == chosen else ""}>{e(labels.get(o, o))}</option>')
+    hidden_vid = f'<input type="hidden" name="vid" value="{preview["id"]}">' if preview else ""
+    disabled_note = "désactivé dans les réglages de ton compte TikTok"
+    form = [
+        f'<form id="tt-form" method="post" action="/connect/{e(token)}/tiktok/settings" '
+        'class="p-6 rounded-lg border border-default bg-card space-y-6">',
+        hidden_vid,
+        '<div><label for="privacy" class="block text-sm font-medium mb-2">Qui peut voir tes vidéos</label>'
+        f'<select id="privacy" name="privacy" required class="w-full h-11 px-3 rounded-md border border-default bg-page text-sm">'
+        f'{"".join(opts)}</select></div>',
+        '<fieldset><legend class="text-sm font-medium mb-1">Autoriser</legend>',
+        _check_row("comment", "Les commentaires", checked=bool(settings.get("comment")),
+                   disabled=bool(creator.get("comment_disabled")), note=disabled_note if creator.get("comment_disabled") else ""),
+        _check_row("duet", "Les duos", checked=bool(settings.get("duet")),
+                   disabled=bool(creator.get("duet_disabled")), note=disabled_note if creator.get("duet_disabled") else ""),
+        _check_row("stitch", "Les stitchs", checked=bool(settings.get("stitch")),
+                   disabled=bool(creator.get("stitch_disabled")), note=disabled_note if creator.get("stitch_disabled") else ""),
+        "</fieldset>",
+        '<fieldset><legend class="text-sm font-medium mb-1">Divulgation du contenu</legend>',
+        _check_row("disclose", "Ces vidéos font la promotion d'une marque, d'un produit ou d'un service",
+                   checked=bool(settings.get("disclose")), disabled=False),
+        '<div id="brand-options" class="pl-7">',
+        _check_row("brand_organic", "Ta marque", checked=bool(settings.get("brand_organic")), disabled=False,
+                   note="Tu fais la promotion de toi-même ou de ta propre activité."),
+        _check_row("brand_content", "Contenu de marque", checked=bool(settings.get("brand_content")), disabled=False,
+                   note="Tu fais la promotion d'une autre marque ou d'un tiers. Ne peut pas être privé."),
+        '<p id="label-hint" class="text-xs text-muted"></p></div></fieldset>',
+        _check_row("auto", "Publier automatiquement chaque nouvelle vidéo de cette chaîne avec ces réglages, "
+                   "aux horaires de la chaîne", checked=auto, disabled=False,
+                   note="Décoché : les vidéos sont envoyées dans tes brouillons TikTok, tu les publies toi-même."),
+        '<p class="text-xs text-muted leading-relaxed">Les vidéos sont signalées comme contenu généré par IA. '
+        f'En publiant, tu acceptes la <a class="underline underline-offset-4" href="{MUSIC_POLICY}" '
+        'target="_blank" rel="noopener">Music Usage Confirmation</a> de TikTok'
+        f'<span id="bc-policy"> et sa <a class="underline underline-offset-4" href="{BC_POLICY}" target="_blank" '
+        'rel="noopener">Branded Content Policy</a></span>.</p>',
+        '<div class="flex flex-wrap gap-3">',
+        f'<button type="submit" name="action" value="save" data-needs-choice class="{BTN_SECONDARY}">Enregistrer</button>',
+    ]
+    if preview and not too_long:
+        form.append(f'<button type="submit" name="action" value="publish" data-needs-choice class="{BTN_PRIMARY}">'
+                    "Publier cette vidéo maintenant</button>")
+        form.append(f'<button type="submit" name="action" value="draft" data-needs-choice class="{BTN_GHOST}">'
+                    "Envoyer en brouillon</button>")
+    form += ["</div>", "</form>", f'<div class="mt-6">{back}</div>',
+             '<script src="/static/tiktok.js"></script>']
+    parts += form
+    return page("Publication TikTok", "\n".join(parts), subtitle="Publication TikTok",
+                note="Les publications peuvent mettre quelques minutes à apparaître sur ton profil.")

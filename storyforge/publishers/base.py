@@ -25,6 +25,8 @@ class PublishRequest:
     kind: str = "vertical"  # vertical | horizontal
     thumbnail_path: str | None = None  # miniature personnalisée (YouTube, vidéo longue)
     video_url: str = ""  # adresse publique de la vidéo (Instagram la télécharge lui-même)
+    duration: float = 0.0  # durée de la vidéo (s)
+    tiktok: dict | None = None  # réglages de publication TikTok choisis par le créateur
 
 
 @dataclass

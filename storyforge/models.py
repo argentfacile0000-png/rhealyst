@@ -117,6 +117,9 @@ class Channel(Base):
     tiktok_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     tiktok_privacy: Mapped[str] = mapped_column(String(32), default="PUBLIC_TO_EVERYONE")
     tiktok_mode: Mapped[str] = mapped_column(String(10), default="direct")  # direct | draft
+    # Réglages de publication choisis par le créateur sur l'écran TikTok (visibilité, interactions,
+    # divulgation commerciale, consentement). Sans eux, aucune publication directe.
+    tiktok_post: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     tiktok_credentials: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     tiktok_account: Mapped[str] = mapped_column(String(120), default="")
 

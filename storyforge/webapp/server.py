@@ -15,8 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from .. import db
-from ..models import Video, VideoFormat, VideoStatus
-from ..publishers import PLATFORM_LABELS
+from ..models import Story, Video, VideoFormat, VideoStatus
+from ..publishers import PLATFORM_LABELS, PublisherError, tiktok
 from ..stats import overview
 from . import pages
 from .auth import validate_init_data
@@ -34,7 +34,8 @@ _CSP_COMMON = ("default-src 'self'; style-src 'self' 'unsafe-inline' https://fon
                "font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; "
                "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'")
 CSP_APP = f"{_CSP_COMMON}; script-src 'self' https://telegram.org; frame-ancestors https://web.telegram.org https://*.telegram.org"
-CSP_PAGE = f"{_CSP_COMMON}; script-src 'self'; frame-ancestors 'none'"
+# Pages web : l'avatar TikTok du créateur est servi par le CDN de TikTok (images uniquement).
+CSP_PAGE = f"{_CSP_COMMON.replace('img-src', 'img-src https:')}; script-src 'self'; frame-ancestors 'none'"
 CSP_DATA = "default-src 'none'; frame-ancestors 'none'"
 
 
@@ -317,16 +318,92 @@ def create_app(svc: Services) -> FastAPI:
             return RedirectResponse(f"/connect/{token}?error={quote(str(exc))}", status_code=303)
         return RedirectResponse(url, status_code=303)
 
-    @app.post("/connect/{token}/{platform}/paste")
-    async def connect_paste(token: str, platform: str, request: Request) -> Response:
-        if not await portal_context(token):
-            return pages.expired(tg_url())
+    async def read_form(request: Request) -> dict[str, list[str]]:
         body = b""
         async for chunk in request.stream():
             body += chunk
             if len(body) > 16384:
                 raise HTTPException(413, "Requête trop volumineuse")
-        form = parse_qs(body.decode("utf-8", "replace"))
+        return parse_qs(body.decode("utf-8", "replace"))
+
+    # --------------------------------------------------------------- TikTok : écran de publication
+    async def tiktok_preview(ch) -> dict | None:
+        async with db.session() as s:
+            v = (await s.execute(
+                select(Video).where(Video.channel_id == ch.id, Video.format == VideoFormat.VERTICAL,
+                                    Video.status.in_((VideoStatus.READY, VideoStatus.PENDING_APPROVAL)))
+                .order_by(Video.id).limit(1)
+            )).scalar_one_or_none()
+            story = await s.get(Story, v.story_id) if v else None
+        if v is None or not v.file_path or not Path(v.file_path).exists():
+            return None
+        url = svc.public_media_url(v.id, ttl=3600).removeprefix(settings.public_base)  # même origine que la page
+        return {"id": v.id, "title": v.title, "duration": v.duration or 0.0, "url": url,
+                "caption": (story.tiktok_caption or story.title) if story else v.title}
+
+    async def tiktok_page(ch, token: str, *, settings: dict | None = None, auto: bool | None = None,
+                          errors: list[str] | None = None, flash: str = "", status: int = 200) -> HTMLResponse:
+        try:
+            creator = await svc.tiktok_creator(ch.id)
+        except PublisherError as exc:
+            return pages.tiktok_settings(ch, token, creator=None, settings={}, auto=False, preview=None,
+                                         labels=tiktok.PRIVACY_LABELS, problem=str(exc))
+        saved = ch.tiktok_post or {}
+        resp = pages.tiktok_settings(
+            ch, token, creator=creator, settings=saved if settings is None else settings,
+            auto=(bool(saved) and ch.tiktok_mode == "direct") if auto is None else auto,
+            preview=await tiktok_preview(ch), labels=tiktok.PRIVACY_LABELS, errors=errors, flash=flash,
+        )
+        resp.status_code = status
+        return resp
+
+    @app.get("/connect/{token}/tiktok/settings")
+    async def tiktok_settings(token: str, ok: str = "") -> Response:
+        ctx = await portal_context(token)
+        if not ctx:
+            return pages.expired(tg_url())
+        ch = ctx[0]
+        if not ch.tiktok_linked:
+            return RedirectResponse(f"/connect/{token}?error={quote('Connecte d abord ton compte TikTok.')}", status_code=303)
+        return await tiktok_page(ch, token, flash=ok)
+
+    @app.post("/connect/{token}/tiktok/settings")
+    async def tiktok_settings_save(token: str, request: Request) -> Response:
+        ctx = await portal_context(token)
+        if not ctx:
+            return pages.expired(tg_url())
+        ch = ctx[0]
+        if not ch.tiktok_linked:
+            return RedirectResponse(f"/connect/{token}", status_code=303)
+        form = await read_form(request)
+        val = lambda k: (form.get(k) or [""])[0]  # noqa: E731
+        settings = {k: val(k) == "1" for k in ("comment", "duet", "stitch", "disclose", "brand_organic", "brand_content")}
+        settings["privacy"] = val("privacy")
+        auto = val("auto") == "1"
+        action = val("action")
+        try:
+            creator = await svc.tiktok_creator(ch.id)
+        except PublisherError as exc:
+            return await tiktok_page(ch, token, settings=settings, auto=auto, errors=[str(exc)], status=400)
+        errors = await svc.save_tiktok_post(ch.id, settings, creator, auto=auto)
+        if errors:
+            return await tiktok_page(ch, token, settings=settings, auto=auto, errors=errors, status=400)
+        flash = "saved"
+        if action in ("publish", "draft") and val("vid").isdigit():
+            v = await svc.get_video(int(val("vid")))
+            if v is None or v.channel_id != ch.id or v.status not in (VideoStatus.READY, VideoStatus.PENDING_APPROVAL):
+                return await tiktok_page(ch, token, errors=["Cette vidéo n'est plus disponible."], status=400)
+            if v.status == VideoStatus.PENDING_APPROVAL:
+                await svc.approve(v.id)
+            svc.enqueue_publish(v.id, ch.id, tiktok_mode="direct" if action == "publish" else "draft")
+            flash = "published" if action == "publish" else "draft"
+        return RedirectResponse(f"/connect/{token}/tiktok/settings?ok={flash}", status_code=303)
+
+    @app.post("/connect/{token}/{platform}/paste")
+    async def connect_paste(token: str, platform: str, request: Request) -> Response:
+        if not await portal_context(token):
+            return pages.expired(tg_url())
+        form = await read_form(request)
         try:
             res = await svc.complete_oauth_from_url((form.get("url") or [""])[0])
         except Exception as exc:

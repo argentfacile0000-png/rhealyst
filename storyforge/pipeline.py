@@ -392,7 +392,7 @@ class Pipeline:
         return ids
 
     # ------------------------------------------------------------------ publication
-    async def publish(self, video_id: int) -> None:
+    async def publish(self, video_id: int, tiktok_mode: str | None = None) -> None:
         async with db.session() as s:
             video = await s.get(Video, video_id)
             if video is None:
@@ -452,7 +452,8 @@ class Pipeline:
                 video_path=video.file_path, title=yt_title, description=description, tags=story.hashtags,
                 caption=caption, language=story.language,
                 privacy=ch.youtube_privacy if platform == "youtube" else ch.tiktok_privacy,
-                mode=ch.tiktok_mode, kind=video.format,
+                mode=tiktok_mode or ch.tiktok_mode, kind=video.format, duration=video.duration or 0.0,
+                tiktok=ch.tiktok_post,
                 thumbnail_path=video.cover_path if video.cover_path and Path(video.cover_path).exists() else None,
             )
             try:
