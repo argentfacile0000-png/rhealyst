@@ -89,6 +89,7 @@ class Services:
         await db.init_db(self.settings.db_url)
         await self.apps.load()
         await self.pipeline.tts.keys.load()
+        await self.pipeline.llm_keys.load()
         await self._recover()
         await self.jobs.start()
         await self.scheduler.start()
@@ -127,10 +128,10 @@ class Services:
     def missing_prereqs(self) -> list[str]:
         s = self.settings
         missing = []
-        if not s.llm.api_key:
-            missing.append(f"{s.llm.env} (IA des histoires)")
+        if not self.pipeline.llm_keys.all() and not (self.pipeline.stories._client or s.llm.api_key):
+            missing.append("clé d'IA (Réglages, Clés API)")
         if not self.pipeline.tts.keys or not self.pipeline.tts.keys.has_keys():
-            missing.append("ELEVENLABS_API_KEY")
+            missing.append("clé ElevenLabs (Réglages, Clés API)")
         if not self.pipeline.bank.categories():
             missing.append("vidéos de fond")
         return missing

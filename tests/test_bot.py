@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import itertools
-import json
 from types import SimpleNamespace
 
 from sqlalchemy import select
@@ -58,6 +57,9 @@ class FakeQuery:
 
     async def edit_message_caption(self, **kw):
         self.edits.append(kw.get("caption"))
+
+    async def edit_message_reply_markup(self, reply_markup=None, **kw):
+        self.markups = getattr(self, "markups", []) + [reply_markup]
 
 
 class FakeMessage:
@@ -122,10 +124,10 @@ async def test_full_dashboard_navigation(svc, tmp_path):
     [ch] = await svc.list_channels()
     cid = ch.id
 
-    for data in ["h", "cl", "gen", "q", "st", "bk", "set", "ev", "bka", f"cv:{cid}", f"ce:{cid}", f"cvv:{cid}:0",
-                 "slv", "slv", "stt", f"cd:{cid}", "noop"]:
+    for data in ["h", "cl", "gen", "q", "md", "bk", "mu", "set", "ak", "pf", "yt", "ev", "bka", f"cv:{cid}",
+                 f"ce:{cid}", f"cvv:{cid}:0", "stt", f"cd:{cid}", "noop"]:
         await click(ctx, data)
-    for group in ["story", "voice", "video", "plan", "pub"]:
+    for group in ["content", "look", "plan", "pub"]:
         await click(ctx, f"cE:{cid}:{group}")
 
     # Tous les réglages : choix, multi, bascules
@@ -137,7 +139,19 @@ async def test_full_dashboard_navigation(svc, tmp_path):
             await click(ctx, f"cm:{cid}:{f.key}:0")
         ctx.user_data.pop("await", None)
     ch = await svc.get_channel(cid)
-    assert ch.language == "it" and ch.parts == 4 and ch.youtube_privacy == "private"
+    assert ch.language == "it" and ch.youtube_privacy == "private"
+    assert (ch.voice_speed, ch.speedup) == (1.15, 1.3)  # rythme « Très rapide »
+
+    # Vitesse personnalisée de la vidéo de fond
+    from storyforge.bot.fields import FIELD_MAP
+
+    custom = len(FIELD_MAP["bg_speed"].options) - 1
+    await click(ctx, f"co:{cid}:bg_speed:{custom}")
+    assert ctx.user_data["await"] == {"kind": "field", "cid": cid, "key": "bg_speed"}
+    msg = await type_text(ctx, "9")
+    assert "entre 0,25 et 4" in msg.replies[-1]
+    await type_text(ctx, "1,3")
+    assert (await svc.get_channel(cid)).bg_speed == 1.3
 
     # Saisies texte
     await click(ctx, f"cf:{cid}:schedule_times")
@@ -154,19 +168,9 @@ async def test_full_dashboard_navigation(svc, tmp_path):
     await click(ctx, f"vsel:{cid}:0")
     assert (await svc.get_channel(cid)).voice_name == "Nova"
 
-    # Liaison YouTube sans fichier OAuth -> écran d'aide ; avec fichier -> URL Google
-    q = await click(ctx, f"cy:{cid}")
-    assert "Configuration manquante" in q.edits[-1]
-    secrets = svc.settings.google_client_secrets_file = tmp_path / "client.json"
-    secrets.write_text(json.dumps({"installed": {
-        "client_id": "x.apps.googleusercontent.com", "client_secret": "y",
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token",
-        "redirect_uris": ["http://localhost"]}}))
-    q = await click(ctx, f"cy:{cid}")
-    assert ctx.user_data["await"]["kind"] == "oauth"
-    msg = await type_text(ctx, "http://localhost:8765/?state=inconnu&code=abc")
-    assert any("expiré" in r for r in msg.replies)
-    await click(ctx, "x")
+    # Comptes sans adresse HTTPS : explication, plus de connexion par adresse collée
+    q = await click(ctx, f"ca:{cid}")
+    assert "HTTPS" in q.edits[-1]
 
     # Activation + génération manuelle avec progression live
     await svc.update_channel(cid, parts=1, min_seconds=5, max_seconds=6, approval_required=True,
@@ -184,6 +188,8 @@ async def test_full_dashboard_navigation(svc, tmp_path):
     # Actions sur la vidéo depuis le message vidéo (média)
     await click(ctx, f"v:{target.id}", media=True)
     await click(ctx, f"vt:{target.id}")
+    await click(ctx, f"vm:{target.id}")  # « Plus d'actions »
+    await click(ctx, f"vml:{target.id}")
     await click(ctx, f"vf:{target.id}")
     await click(ctx, f"va:{target.id}", media=True)
     assert (await svc.get_video(target.id)).status == VideoStatus.READY

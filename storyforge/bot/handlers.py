@@ -42,29 +42,7 @@ log = logging.getLogger(__name__)
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 CANCEL = [("Annuler", "x")]
 
-HELP = """<b>Aide</b>
 
-StoryForge fabrique des vidéos <i>storytime</i> : histoire écrite par ChatGPT, voix ElevenLabs, fond tiré au hasard dans ta banque (séquence aléatoire de la bonne durée), sous-titres mot à mot, puis publication sur YouTube Shorts et TikTok.
-
-<b>Commandes</b>
-/start  Dashboard
-/channels  Chaînes
-/new  Nouvelle chaîne
-/generate  Générer maintenant
-/queue  File d'attente et planning
-/stats  Statistiques
-/bank  Banque vidéo
-/settings  Réglages système
-/log  Journal
-/cancel  Annuler une saisie
-/myid  Ton identifiant Telegram
-
-<b>Pour commencer</b>
-1. Ajoute des vidéos de fond, idéalement longues (20 à 60 min).
-2. Crée une chaîne : langue, formats, voix.
-3. Lie YouTube et/ou TikTok.
-4. Active-la : la réserve se remplit et les créneaux publient seuls.
-"""
 
 
 def svc_of(context: ContextTypes.DEFAULT_TYPE) -> Services:
@@ -122,38 +100,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await show(update, context, await screens.home(svc_of(context)), new=True)
 
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await guard(update, context):
-        return
-    await update.effective_message.reply_html(HELP, reply_markup=kb([[("Ouvrir le dashboard", "h")]]))
-
-
-async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user:
-        await update.effective_message.reply_html(f"🆔 <code>{update.effective_user.id}</code>")
-
-
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await guard(update, context):
         return
     context.user_data.pop("await", None)
     await update.effective_message.reply_text("Saisie annulée.", reply_markup=kb([[("Ouvrir le dashboard", "h")]]))
-
-
-def screen_cmd(builder):
-    async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        if not await guard(update, context):
-            return
-        await show(update, context, await builder(svc_of(context)), new=True)
-
-    return handler
-
-
-async def cmd_new(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await guard(update, context):
-        return
-    await prompt(update, context, "<b>Nouvelle chaîne</b>\n\nComment s'appelle cette chaîne ?\n"
-                 "<i>Exemples : Histoires Folles, Reddit Stories US</i>", {"kind": "new_channel"})
 
 
 # ---------------------------------------------------------------------------- génération
@@ -338,65 +289,22 @@ async def elevenlabs_keys_action(update: Update, context: ContextTypes.DEFAULT_T
 
 
 # ---------------------------------------------------------------------------- comptes
-async def link_account(update: Update, context: ContextTypes.DEFAULT_TYPE, cid: int, platform: str) -> None:
-    svc = svc_of(context)
-    q = update.callback_query
-    ch = await svc.get_channel(cid)
-    docs = {
-        "youtube": "Crée un client OAuth « Application de bureau » dans Google Cloud Console (API YouTube Data v3 "
-                   "activée), télécharge le JSON et place-le dans <code>secrets/google_client_secret.json</code>.",
-        "tiktok": "Crée une app sur developers.tiktok.com (Login Kit + Content Posting API), puis renseigne "
-                  "<code>TIKTOK_CLIENT_KEY</code>, <code>TIKTOK_CLIENT_SECRET</code> et <code>TIKTOK_REDIRECT_URI</code>.",
-        "instagram": "Crée une app sur developers.facebook.com (produit Instagram, connexion Instagram), renseigne "
-                     "<code>INSTAGRAM_APP_ID</code> et <code>INSTAGRAM_APP_SECRET</code>, et active PUBLIC_URL (https).",
-    }
-    try:
-        problem = svc.platform_problem(platform, cid)
-        if problem and platform == "instagram":
-            raise PublisherError(problem)
-        url = svc.auth_url(platform, cid)
-    except PublisherError as exc:
-        await q.answer()
-        doc = docs[platform]
-        await show(update, context, (f"<b>Configuration manquante</b>\n\n{esc(exc)}\n\n{doc}",
-                                     kb([[("← Comptes", f"ca:{cid}")]])))
-        return
-    await q.answer()
-    name = PLATFORM[platform]
-    auto = svc.oauth_is_automatic(platform, cid)
-    steps = [
-        f"<b>Connecter {name}</b> · {esc(ch.name)}",
-        "",
-        f"1. Ouvre le lien et connecte le compte {name} de cette chaîne.",
-    ]
-    if auto:
-        steps.append("2. C'est tout : la liaison est automatique, je te préviens ici.")
-    else:
-        steps += [
-            "2. Après l'autorisation, une page s'ouvre. <i>Une erreur « site inaccessible » est normale.</i>",
-            "3. Copie l'adresse complète de cette page et colle-la ici.",
-        ]
-    linked = ch.youtube_linked if platform == "youtube" else ch.tiktok_linked
-    rows = [[(f"Autoriser {name}", url)]]
-    if linked:
-        rows.append([(f"Déconnecter {name}", f"cu:{cid}:{platform}")])
-    rows.append([("← Comptes", f"ca:{cid}")])
-    context.user_data["await"] = {"kind": "oauth", "cid": cid, "platform": platform}
-    await show(update, context, ("\n".join(steps), kb(rows)))
-
-
 # ---------------------------------------------------------------------------- tests
 async def test_apis(svc: Services) -> screens.Screen:
     s = svc.settings
-    lines = ["<b>Diagnostic</b>", ""]
+    lines = ["<b>État du système</b>", ""]
 
     def check(ok: bool, label: str, detail: str) -> None:
         lines.append(f"{'✓' if ok else '✕'}  {label}  <i>{esc(detail)}</i>")
 
-    try:
-        check(True, "IA des histoires", await svc.pipeline.stories.ping())
-    except Exception as exc:
-        check(False, f"IA des histoires ({s.llm.label})", str(exc)[:150])
+    keys = svc.pipeline.llm_keys.all()
+    if not keys:
+        check(False, "IA des histoires", "aucune clé : Réglages, Clés API")
+    for k in keys:
+        try:
+            check(True, f"IA {k.label} {k.masked}", await svc.pipeline.stories.ping_key(k))
+        except Exception as exc:
+            check(False, f"IA {k.label} {k.masked}", str(exc)[:150])
     try:
         sub = await svc.pipeline.tts.subscription()
         check(True, "ElevenLabs", f"forfait {sub.get('tier', '?')}, "
@@ -411,10 +319,9 @@ async def test_apis(svc: Services) -> screens.Screen:
     check(bool(fonts), "Polices", f"{len(fonts)} fichier(s)")
     cats = svc.pipeline.bank.categories()
     check(bool(cats), "Vidéos de fond", f"{sum(len(v) for v in cats.values())} fichier(s)")
-    has_google = s.google_client_secrets_file.exists()
-    check(has_google, "OAuth Google", "présent" if has_google else "secrets/google_client_secret.json manquant")
-    tt_ok = bool(s.tiktok_client_key and s.tiktok_client_secret and s.tiktok_redirect_uri)
-    check(tt_ok, "TikTok", "configuré" if tt_ok else "clés manquantes")
+    for platform, label in (("youtube", "YouTube"), ("tiktok", "TikTok"), ("instagram", "Instagram")):
+        problem = svc.platform_problem(platform, 0)
+        check(problem is None, label, "app configurée" if problem is None else problem)
     check(bool(ytdlp_command()), "yt-dlp", "ajout de fonds par lien")
     return "\n".join(lines), kb([[("Relancer", "stt"), ("← Réglages", "set")]])
 
@@ -434,8 +341,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     simple = {
         "h": screens.home, "cl": screens.channel_list, "gen": screens.generate_picker, "q": screens.queue,
-        "st": screens.stats, "bk": screens.bank, "set": screens.settings_screen, "ev": screens.events,
-        "bka": screens.bank_categories, "mu": screens.music_bank, "pf": screens.platforms,
+        "bk": screens.bank, "set": screens.settings_screen, "ev": screens.events, "md": screens.media,
+        "bka": screens.bank_categories, "mu": screens.music_bank, "pf": screens.platforms, "ak": screens.api_keys,
     }
     if head in simple:
         await q.answer()
@@ -481,7 +388,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await q.answer(f"Publication de #{v.id} lancée")
     elif head == "ce":
         await q.answer()
-        await show(update, context, await screens.channel_edit(svc, cid))
+        await show(update, context, await screens.channel_view(svc, cid))
     elif head == "cE":
         await q.answer()
         await show(update, context, await screens.channel_group(svc, cid, parts[2]))
@@ -490,6 +397,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     elif head == "co":
         f = FIELD_MAP[parts[2]]
         label, value = f.options[int(parts[3])]
+        if value == "custom":  # valeur libre : on la demande en texte
+            await q.answer()
+            ch = await svc.get_channel(cid)
+            await prompt(update, context, f"<b>{esc(f.label)}</b> · {esc(ch.name)}\n\nValeur actuelle : "
+                         f"<b>{esc(f.value_text(ch))}</b>\n\n{f.hint}", {"kind": "field", "cid": cid, "key": f.key})
+            return
         await svc.update_channel(cid, **f.updates_for(value))
         await q.answer(f"{f.label} : {label}")
         await show(update, context, await screens.channel_group(svc, cid, f.group))
@@ -505,16 +418,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await svc.update_channel(cid, voice_id=v["voice_id"], voice_name=v["name"])
         await q.answer(f"Voix : {v['name']}")
         await show(update, context, await screens.channel_group(svc, cid, "voice"))
-    elif head == "vid":
-        await q.answer()
-        await prompt(update, context, "<b>ID de voix</b>\n\nEnvoie l'identifiant de la voix ElevenLabs.\n<i>Dans ElevenLabs : Voices, puis l'icône ID.</i>",
-                     {"kind": "voice_id", "cid": cid})
-    elif head == "cy":
-        await link_account(update, context, cid, "youtube")
-    elif head == "ck":
-        await link_account(update, context, cid, "tiktok")
-    elif head == "ci":
-        await link_account(update, context, cid, "instagram")
     elif head == "cu":
         platform = parts[2]
         await svc.unlink(cid, platform)
@@ -551,6 +454,16 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await video_action(update, context, head, cid)
     elif head in ("var", "vua", "vsc", "vsq", "vsu", "vsp", "vsx"):
         await video_extra_action(update, context, head, parts)
+    elif head in ("aka", "akd", "aku", "akr"):
+        await api_key_action(update, context, head, parts)
+    elif head in ("vm", "vml"):
+        v = await svc.get_video(cid)
+        await q.answer()
+        if v is not None:
+            try:
+                await q.edit_message_reply_markup(screens.video_keyboard(v, more=head == "vm"))
+            except BadRequest:
+                pass
     elif head in ("ek", "eka", "ekd", "ekr"):
         await elevenlabs_keys_action(update, context, head, parts)
     elif head == "bkc":
@@ -586,11 +499,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await q.answer("Système relancé" if paused else "Système en pause")
         from_settings = q.message is not None and (q.message.text or "").startswith("Réglages système")
         await show(update, context, await (screens.settings_screen(svc) if from_settings else screens.home(svc)))
-    elif head == "slv":
-        live = bool(await db.kv_get("live_auto", False))
-        await db.kv_set("live_auto", not live)
-        await q.answer("Suivi en direct " + ("désactivé" if live else "activé"))
-        await show(update, context, await screens.settings_screen(svc))
     elif head == "sau":
         flag = auto_update_flag(svc.settings.data_dir)
         if flag.exists():
@@ -699,9 +607,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
 
     if state is None:
-        if "code=" in text and "state=" in text:
-            state = {"kind": "oauth"}
-        elif re.fullmatch(r"https?://\S+", text):
+        if re.fullmatch(r"https?://\S+", text):
             await offer_link(update, context, text)  # un lien envoyé à tout moment : où l'ajouter ?
             return
         else:
@@ -733,13 +639,6 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await svc.update_channel(state["cid"], voice_id=text, voice_name=name)
             context.user_data.pop("await", None)
             await show(update, context, await screens.channel_group(svc, state["cid"], "voice"), new=True)
-        elif kind == "oauth":
-            info = await msg.reply_text("Vérification de l'autorisation…")
-            res = await svc.complete_oauth_from_url(text)
-            context.user_data.pop("await", None)
-            label = PLATFORM[res.platform]
-            await info.edit_text(f"✓ {label} connecté à « {res.channel.name} » : {res.account}")
-            await show(update, context, await screens.accounts(svc, res.channel.id), new=True)
         elif kind == "schedule":
             v = await svc.get_video(state["vid"])
             ch = await svc.get_channel(v.channel_id) if v else None
@@ -796,6 +695,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await show(update, context, await screens.ytdlp_settings(svc), new=True)
         elif kind == "ytdlp_cookies":
             raise ValueError("Envoie le fichier cookies.txt lui-même (trombone, Fichier)")
+        elif kind == "api_key":
+            await receive_api_key(update, context, text)
         elif kind == "site_verify":
             await publish_verification(update, context, None, text)
         elif kind == "google_json":
@@ -1030,6 +931,78 @@ async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: st
     await info.edit_text(f"✓ Ajoutée : {path.name}, {int(dur // 60)} min {int(dur % 60):02d} s",
                          reply_markup=kb([[("Banque vidéo", "bk")]]))
     await db.log_event(f"Nouveau fond dans « {category} » : {path.name}")
+
+
+# ---------------------------------------------------------------------------- clés API
+ELEVEN_RE = re.compile(r"sk_[0-9a-f]{40,64}")
+
+
+async def api_key_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str, parts: list[str]) -> None:
+    svc = svc_of(context)
+    q = update.callback_query
+    ring = svc.pipeline.llm_keys
+    kid = parts[1] if len(parts) > 1 else ""
+    if head == "aka":
+        await q.answer()
+        await prompt(update, context, "<b>Ajouter une clé</b>\n\nColle une clé d'IA (Gemini, Groq, OpenAI, OpenRouter) "
+                     "ou ElevenLabs : je reconnais le fournisseur, je la vérifie puis je supprime ton message.\n\n"
+                     "<i>Gratuit : Gemini sur aistudio.google.com/apikey, Groq sur console.groq.com/keys.</i>",
+                     {"kind": "api_key"})
+        return
+    if head == "akd":
+        await ring.remove(kid)
+        await db.log_event("Clé d'IA retirée")
+        await q.answer("Clé retirée")
+    elif head == "aku":
+        await ring.move_up(kid)
+        await q.answer("Clé remontée")
+    elif head == "akr":
+        await ring.reactivate(kid)
+        await q.answer("Clé réactivée")
+    await show(update, context, await screens.api_keys(svc))
+
+
+async def receive_api_key(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    from ..story.generator import KeyFailure
+    from ..story.llm_keys import LLMKey, detect_provider
+
+    svc = svc_of(context)
+    msg = update.effective_message
+    try:  # la clé ne reste pas dans la conversation
+        await msg.delete()
+    except (TelegramError, AttributeError):
+        pass
+    key = text.strip()
+    chat = update.effective_chat.id
+    if ELEVEN_RE.fullmatch(key):
+        try:
+            sub = await svc.pipeline.tts.subscription(api_key=key)
+        except Exception as exc:
+            raise ValueError(f"Clé refusée par ElevenLabs : {exc}") from exc
+        await svc.pipeline.tts.keys.add(key)
+        svc._quota_cache = (0.0, None)
+        left = int(sub.get("character_limit", 0)) - int(sub.get("character_count", 0))
+        note = f"✓ Clé ElevenLabs ajoutée : {max(0, left)} caractères disponibles."
+    else:
+        provider = detect_provider(key)
+        if provider is None or not re.fullmatch(r"[A-Za-z0-9_\-.]{20,200}", key):
+            raise ValueError("Clé non reconnue. Formats acceptés : Gemini (AIza…), Groq (gsk_…), OpenAI (sk-…), "
+                             "OpenRouter (sk-or-…), ElevenLabs (sk_…)")
+        candidate = LLMKey(key, provider, "bot")
+        try:
+            model = await svc.pipeline.stories.ping_key(candidate)
+            note = f"✓ Clé {candidate.label} ajoutée et vérifiée ({model})."
+        except KeyFailure as exc:
+            if exc.reason == "invalide":
+                raise ValueError(f"Clé refusée par {candidate.label} : {exc}") from exc
+            note = f"✓ Clé {candidate.label} ajoutée ({exc.reason} pour le moment, elle servira plus tard)."
+        except Exception as exc:
+            note = f"✓ Clé {candidate.label} ajoutée (vérification impossible : {str(exc)[:80]})."
+        await svc.pipeline.llm_keys.add(key, provider)
+    context.user_data.pop("await", None)
+    await db.log_event(note.lstrip("✓ "), "success")
+    await context.bot.send_message(chat, note)
+    await show(update, context, await screens.api_keys(svc), new=True)
 
 
 # ---------------------------------------------------------------------------- plateformes (apps développeur)
@@ -1467,17 +1440,7 @@ def register(app: Application) -> None:
     app.add_handler(TypeHandler(Update, AccessGate()), group=-1)
     private = filters.ChatType.PRIVATE
     app.add_handler(CommandHandler(["start", "dashboard", "menu"], cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("myid", cmd_myid))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
-    app.add_handler(CommandHandler("new", cmd_new))
-    app.add_handler(CommandHandler("channels", screen_cmd(screens.channel_list)))
-    app.add_handler(CommandHandler("generate", screen_cmd(screens.generate_picker)))
-    app.add_handler(CommandHandler("queue", screen_cmd(screens.queue)))
-    app.add_handler(CommandHandler("stats", screen_cmd(screens.stats)))
-    app.add_handler(CommandHandler("bank", screen_cmd(screens.bank)))
-    app.add_handler(CommandHandler("settings", screen_cmd(screens.settings_screen)))
-    app.add_handler(CommandHandler("log", screen_cmd(screens.events)))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(private & (filters.VIDEO | filters.AUDIO | filters.VOICE | filters.Document.ALL),
                                    on_file))

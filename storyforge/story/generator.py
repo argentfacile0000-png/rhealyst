@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 
 from ..config import Settings
 from .prompts import SYSTEM_PROMPT, build_length_fix_prompt, build_user_prompt
+from .llm_keys import INVALID_FOR
 from .styles import DEFAULT_FORMATS, FORMATS, get_language, random_dna
 
 log = logging.getLogger(__name__)
@@ -122,22 +123,33 @@ def _is_reasoning_model(model: str) -> bool:
     return m.startswith(("o1", "o3", "o4", "gpt-5"))
 
 
+class KeyFailure(StoryError):
+    """Erreur propre à une clé (invalide, quota, limite) : la clé suivante peut prendre le relais."""
+
+    def __init__(self, message: str, cooldown: float, reason: str):
+        super().__init__(message)
+        self.cooldown, self.reason = cooldown, reason
+
+
 class StoryGenerator:
-    def __init__(self, settings: Settings, client: AsyncOpenAI | None = None):
+    def __init__(self, settings: Settings, client: AsyncOpenAI | None = None, keys=None):
         self.settings = settings
-        self._client = client
+        self._client = client  # client imposé (tests) : pas de trousseau
+        self.keys = keys  # LLMKeyRing
+        self.on_event = None  # async (texte) : bascule de clé, pour prévenir l'admin
+        self.last_model = ""
 
     @property
     def client(self) -> AsyncOpenAI:
         if self._client is None:
             llm = self.settings.llm
             if not llm.api_key:
-                raise StoryError(f"{llm.env} manquant dans le .env (IA qui écrit les histoires)")
+                raise StoryError("Aucune clé d'IA : ajoute-en une dans Réglages, Clés API")
             self._client = AsyncOpenAI(api_key=llm.api_key, base_url=llm.base_url, max_retries=2)
         return self._client
 
-    def _request_kwargs(self, messages: list[dict], long_form: bool = False) -> dict:
-        llm = self.settings.llm
+    def _request_kwargs(self, messages: list[dict], long_form: bool = False, llm=None) -> dict:
+        llm = llm or self.settings.llm
         kwargs: dict = {"model": llm.model, "messages": messages, "response_format": {"type": "json_object"}}
         if llm.provider == "openai":
             if _is_reasoning_model(llm.model):
@@ -156,12 +168,12 @@ class StoryGenerator:
             kwargs["temperature"] = self.settings.openai_temperature
         return kwargs
 
-    async def _create(self, kwargs: dict):
-        llm = self.settings.llm
-        invalid_key = StoryError(f"Clé API {llm.label} invalide ({llm.env})")
+    @staticmethod
+    async def _create_with(client: AsyncOpenAI, llm, kwargs: dict):
+        invalid_key = KeyFailure(f"Clé API {llm.label} invalide", INVALID_FOR, "invalide")
         try:
             try:
-                return await self.client.chat.completions.create(**kwargs)
+                return await client.chat.completions.create(**kwargs)
             except openai.BadRequestError as exc:
                 if _is_key_error(exc):  # Gemini signale une clé invalide en 400
                     raise invalid_key from exc
@@ -169,38 +181,88 @@ class StoryGenerator:
                 log.warning("%s a refusé la requête (%s) — nouvel essai simplifié", llm.label, exc)
                 minimal = {"model": kwargs["model"], "messages": kwargs["messages"]}
                 try:
-                    return await self.client.chat.completions.create(**minimal)
+                    return await client.chat.completions.create(**minimal)
                 except openai.BadRequestError as exc2:
                     if _is_key_error(exc2):
                         raise invalid_key from exc2
                     raise StoryError(f"{llm.label} a refusé la requête : {_error_text(exc2)[:200]}") from exc2
         except openai.RateLimitError as exc:
-            raise StoryError(
-                f"Limite de {llm.label} atteinte pour le moment"
-                + (" (offre gratuite)" if llm.free else "") + ", réessaie un peu plus tard"
-            ) from exc
-        except openai.AuthenticationError as exc:
-            raise StoryError(f"Clé API {llm.label} invalide ({llm.env})") from exc
+            quota = "quota" in _error_text(exc).lower()
+            raise KeyFailure(f"Limite de {llm.label} atteinte" + (" (offre gratuite)" if llm.free else ""),
+                             3600 if quota else 120, "quota atteint" if quota else "limite de débit") from exc
+        except (openai.AuthenticationError, openai.PermissionDeniedError) as exc:
+            raise invalid_key from exc
         except openai.NotFoundError as exc:
-            raise StoryError(f"Modèle « {llm.model} » introuvable chez {llm.label} : change LLM_MODEL dans le .env") from exc
+            raise KeyFailure(f"Modèle « {llm.model} » introuvable chez {llm.label}", 3600, "modèle introuvable") from exc
         except openai.APIConnectionError as exc:
-            raise StoryError(f"{llm.label} injoignable : {exc}") from exc
+            raise KeyFailure(f"{llm.label} injoignable : {exc}", 60, "injoignable") from exc
+        except openai.InternalServerError as exc:
+            raise KeyFailure(f"{llm.label} en panne : {exc}", 120, "panne du fournisseur") from exc
+
+    async def _create(self, kwargs: dict, long_form: bool = False):
+        """Envoie la requête ; avec le trousseau, essaie les clés une à une jusqu'à ce qu'une réponde."""
+        if self._client is not None or self.keys is None:
+            llm = self.settings.llm
+            self.last_model = llm.model
+            try:
+                return await self._create_with(self.client, llm, kwargs)
+            except KeyFailure as exc:
+                raise StoryError(str(exc)) from exc
+        candidates = self.keys.available()
+        if not candidates:
+            if self.keys.all():
+                raise StoryError("Toutes les clés d'IA sont indisponibles (quota ou invalides) : ajoute une clé "
+                                 "dans Réglages, Clés API")
+            raise StoryError("Aucune clé d'IA : ajoute-en une dans Réglages, Clés API")
+        errors = []
+        for i, key in enumerate(candidates):
+            llm = key.config(self.settings)
+            client = AsyncOpenAI(api_key=key.key, base_url=llm.base_url, max_retries=1)
+            req = dict(kwargs, **{k: v for k, v in self._request_kwargs(kwargs["messages"], long_form, llm).items()
+                                  if k != "messages"})
+            try:
+                resp = await self._create_with(client, llm, req)
+            except KeyFailure as exc:
+                errors.append(f"{key.label} {key.masked} : {exc.reason}")
+                await self.keys.mark_failed(key, exc.cooldown, exc.reason)
+                if self.on_event and i + 1 < len(candidates):
+                    nxt = candidates[i + 1]
+                    try:
+                        await self.on_event(f"Clé IA {key.label} {key.masked} : {exc.reason}, "
+                                            f"passage à {nxt.label} {nxt.masked}")
+                    except Exception:
+                        pass
+                continue
+            self.keys.current = key.kid
+            self.last_model = llm.model
+            return resp
+        raise StoryError("Aucune clé d'IA n'a répondu : " + " ; ".join(errors))
+
+    async def ping_key(self, key) -> str:
+        """Vérifie une clé avec une requête minuscule. Retourne « fournisseur · modèle »."""
+        llm = key.config(self.settings)
+        client = AsyncOpenAI(api_key=key.key, base_url=llm.base_url, max_retries=0)
+        await self._create_with(client, llm, {"model": llm.model, "max_tokens": 64,
+                                              "messages": [{"role": "user", "content": "Réponds juste OK."}]})
+        return f"{llm.label} · {llm.model}"
 
     async def ping(self) -> str:
-        """Vérifie la clé et le modèle avec une requête minuscule. Retourne « fournisseur · modèle »."""
-        llm = self.settings.llm
-        if llm.provider == "openai":
+        """Vérifie la première clé disponible (ou le client imposé)."""
+        if self.keys is not None and self._client is None:
+            keys = self.keys.available()
+            if not keys:
+                raise StoryError("Aucune clé d'IA disponible")
             try:
-                await self.client.models.retrieve(llm.model)
-            except openai.AuthenticationError as exc:
-                raise StoryError(f"Clé API {llm.label} invalide ({llm.env})") from exc
-        else:
-            await self._create({"model": llm.model, "messages": [{"role": "user", "content": "Réponds juste OK."}],
-                                "max_tokens": 64})
+                return await self.ping_key(keys[0])
+            except KeyFailure as exc:
+                raise StoryError(str(exc)) from exc
+        llm = self.settings.llm
+        await self._create({"model": llm.model, "messages": [{"role": "user", "content": "Réponds juste OK."}],
+                            "max_tokens": 64})
         return f"{llm.label} · {llm.model}"
 
     async def _complete(self, messages: list[dict], long_form: bool = False) -> tuple[dict, int, int]:
-        resp = await self._create(self._request_kwargs(messages, long_form))
+        resp = await self._create(self._request_kwargs(messages, long_form), long_form)
         content = (resp.choices[0].message.content or "").strip()
         usage = resp.usage
         pt = getattr(usage, "prompt_tokens", 0) or 0
@@ -306,7 +368,7 @@ class StoryGenerator:
             description=data["description"],
             hashtags=data["hashtags"],
             tiktok_caption=data["tiktok_caption"],
-            model=self.settings.llm.model,
+            model=self.last_model or self.settings.llm.model,
             prompt_tokens=pt,
             completion_tokens=ct,
             dna=dna.as_prompt(),

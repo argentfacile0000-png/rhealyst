@@ -27,6 +27,7 @@ from .video.background import BackgroundBank
 from .video.captions import CaptionStyle, build_ass, hook_end_time
 from .video.card import render_cover, render_hook_card
 from .video.ffmpeg import probe_dimensions
+from .story.llm_keys import LLMKeyRing
 from .video.music import MusicBank
 from .video.renderer import RenderJob, grab_frame, make_telegram_preview, make_thumbnail, render
 from .video.split import cut_part, plan_cuts, words_between
@@ -66,7 +67,9 @@ class Pipeline:
     def __init__(self, settings: Settings, notifier: Notifier):
         self.settings = settings
         self.notifier = notifier
-        self.stories = StoryGenerator(settings)
+        self.llm_keys = LLMKeyRing(settings)
+        self.stories = StoryGenerator(settings, keys=self.llm_keys)
+        self.stories.on_event = self._ai_event
         self.tts = ElevenLabsClient(settings.elevenlabs_api_key, settings.elevenlabs_model, ffmpeg=settings.ffmpeg_bin,
                                     keys=KeyRing(settings))
         self.tts.on_event = self._tts_event
@@ -228,13 +231,15 @@ class Pipeline:
 
             # 2) Fond : vidéo au hasard + séquence au hasard qui couvre toute la durée
             await progress.update("background", "run")
-            seg = await self.bank.pick(
-                duration, categories=ch.bg_categories or None, recent=await self._recent_segments(), rng=rng
+            bg_speed = min(4.0, max(0.25, ch.bg_speed or 1.0))
+            seg = await self.bank.pick(  # à 1,5×, il faut 1,5 fois plus de vidéo source
+                duration * bg_speed, categories=ch.bg_categories or None, recent=await self._recent_segments(), rng=rng
             )
             rel = seg.path.relative_to(self.settings.backgrounds_dir) if seg.path.is_relative_to(self.settings.backgrounds_dir) else seg.path.name
             await progress.update(
                 "background", "done",
-                detail=f"{rel} · {fmt_ts(seg.start)} → {fmt_ts(seg.start + duration)} (sur {fmt_ts(seg.source_duration)})",
+                detail=f"{rel} · {fmt_ts(seg.start)} → {fmt_ts(seg.start + duration * bg_speed)} "
+                       f"(sur {fmt_ts(seg.source_duration)})" + (f" · {bg_speed:g}×" if bg_speed != 1.0 else ""),
             )
 
             # 3) Sous-titres + carte d'accroche
@@ -274,7 +279,7 @@ class Pipeline:
                     segment=seg, narration=tts.audio_path, ass_file=ass, output=out, duration=duration,
                     card_png=card_png, card_until=card_until, music=music.path if music else None,
                     music_start=music.start if music else 0.0,
-                    music_volume=ch.music_volume, bg_volume=ch.bg_volume, width=W, height=H,
+                    music_volume=ch.music_volume, bg_volume=ch.bg_volume, bg_speed=bg_speed, width=W, height=H,
                 ),
                 self.settings,
                 on_progress=on_progress,
@@ -317,6 +322,10 @@ class Pipeline:
                     v.status = VideoStatus.FAILED
                     v.error = str(exc)[:1000]
             raise
+
+    async def _ai_event(self, text: str) -> None:
+        await db.log_event(text, "warning")
+        await self.notifier.notify(f"<b>IA des histoires</b>\n\n{html.escape(text)}", "warning")
 
     async def _tts_event(self, text: str) -> None:
         await db.log_event(text, "warning")

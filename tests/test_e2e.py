@@ -82,7 +82,7 @@ async def test_generate_render_and_publish(svc, monkeypatch):
     assert o["today"]["published"] == 2 and o["channels"][0]["pending"] == 1
     for screen in (
         await screens.home(svc), await screens.channel_view(svc, ch.id), await screens.queue(svc),
-        await screens.stats(svc), await screens.bank(svc), await screens.channel_videos(svc, ch.id),
+        await screens.media(svc), await screens.api_keys(svc), await screens.bank(svc), await screens.channel_videos(svc, ch.id),
         await screens.video_view(svc, ids[0], with_text=True), await screens.channel_group(svc, ch.id, "video"),
         await screens.field_choices(svc, ch.id, "formats"), await screens.events(svc),
         await screens.settings_screen(svc),

@@ -210,11 +210,9 @@ async def test_bot_format_chooser_and_instagram(svc):
     assert "Quel format" in q.edits[-1]
     q = await click(ctx, f"ca:{ch.id}")
     assert "Instagram" in q.edits[-1]
-    q = await click(ctx, f"ci:{ch.id}")
-    assert "Configuration manquante" in q.edits[-1]
     q = await click(ctx, f"cv:{ch.id}")
     assert "Vidéos longues" in q.edits[-1] and "Instagram" in q.edits[-1]
-    q = await click(ctx, f"cE:{ch.id}:formats")
+    q = await click(ctx, f"cE:{ch.id}:content")
     assert "Durée des vidéos longues" in q.edits[-1]
 
 
@@ -244,7 +242,7 @@ async def test_version_and_auto_update_toggle(svc, tmp_path, monkeypatch):
     assert version_mod.deployed_version()["short"] == "aaaaaaa"
     ctx, _ = make_ctx(svc)
     q = await click(ctx, "set")
-    assert "aaaaaaa" in q.edits[-1] and "activées" in q.edits[-1]
+    assert "aaaaaaa" in q.edits[-1] and "mises à jour auto" in q.edits[-1]
     await click(ctx, "sau")
     assert version_mod.auto_update_flag(svc.settings.data_dir).exists()
     await click(ctx, "sau")

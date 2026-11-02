@@ -42,6 +42,11 @@ class KeyRing:
     async def load(self) -> None:
         self._bot_keys = [k for k in (await db.kv_get(KV_KEYS, []) or []) if isinstance(k, str)]
         self._exhausted = dict(await db.kv_get(KV_EXHAUSTED, {}) or {})
+        # Les clés du .env sont reprises dans le dashboard : elles y restent même si on les retire du .env.
+        new = [k for k in self.env_keys() if k not in self._bot_keys]
+        if new:
+            self._bot_keys = new + self._bot_keys
+            await db.kv_set(KV_KEYS, self._bot_keys)
 
     def env_keys(self) -> list[str]:
         keys = [self.settings.elevenlabs_api_key] + self.settings.elevenlabs_api_keys.replace(";", ",").split(",")
@@ -49,7 +54,7 @@ class KeyRing:
 
     def all(self) -> list[ElevenKey]:
         seen, out = set(), []
-        for key, source in [(k, "env") for k in self.env_keys()] + [(k, "bot") for k in self._bot_keys]:
+        for key, source in [(k, "bot") for k in self._bot_keys] + [(k, "env") for k in self.env_keys()]:
             if key not in seen:
                 seen.add(key)
                 out.append(ElevenKey(key, source))

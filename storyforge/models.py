@@ -91,6 +91,7 @@ class Channel(Base):
     music_volume: Mapped[float] = mapped_column(Float, default=0.0)  # 0 = pas de bande son
     music_tracks: Mapped[list[str] | None] = mapped_column(JSON, default=list)  # vide = toute la banque
     bg_volume: Mapped[float] = mapped_column(Float, default=0.0)
+    bg_speed: Mapped[float] = mapped_column(Float, default=1.0)  # vitesse de la vidéo de fond (0,25 à 4)
 
     # --- Formats -----------------------------------------------------------
     shorts_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # vidéos verticales

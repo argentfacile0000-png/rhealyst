@@ -106,13 +106,22 @@ palette neutre, typographie Inter, cartes à bordure, beaucoup d'espace, couleur
 (titres et valeurs en gras, informations secondaires en italique), sans emoji décoratif ; les statuts utilisent
 des glyphes monochromes (● actif, ○ en pause, ✓ fait, ✕ échec) toujours accompagnés d'un libellé.
 
-- **Accueil** : état du système, générées / publiées / à valider / échecs du jour, tâches en cours, chaînes et prochains créneaux, crédits ElevenLabs.
-- **Chaînes** : activer ou mettre en pause, générer maintenant, publier la suivante, historique des vidéos, liaison YouTube / TikTok.
-- **Réglages par chaîne** (Histoire, Voix, Vidéo, Planning, Publication) : langue, formats, narrateur, parties, durée, voix ElevenLabs, vitesse, fonds, style des sous-titres, label « Partie N », carte d'accroche, musique, horaires, fuseau, décalage aléatoire, validation manuelle, réserve, visibilité YouTube / TikTok, mode TikTok.
-- **Progression en direct** : histoire → voix off → séquence de fond → montage (barre de progression) → finalisation.
-- **Validation** : chaque vidéo arrive avec Publier maintenant · Valider · Régénérer · Jeter · Aperçu · Texte complet.
-- **Notifications** : liens YouTube / TikTok dès la publication, erreurs avec Réessayer.
-- **File d'attente**, **Statistiques** (14 jours), **Banque vidéo** (ajout par fichier ou par lien), **Journal**, **Réglages** (pause globale, diagnostic des APIs).
+Tout part de `/start` (et `/cancel` pour annuler une saisie) :
+
+- **Accueil** : état, vidéos à valider et prêtes, bilan du jour, prochaine publication, crédits ElevenLabs, ce qui
+  reste à configurer. Boutons : À valider / Vidéos · Chaînes · Générer · Médias · Réglages · Pause.
+- **Vidéos** : à valider et prêtes, programmées, en cours, prochains créneaux.
+- **Chaîne** : résumé, Activer / Générer, puis quatre sections :
+  - **Contenu** : nom, langue, types d'histoires, narrateur, consignes, voix, rythme de narration, Shorts
+    (durée, découpage en parties), vidéos longues ;
+  - **Apparence** : vidéos de fond (catégories, vitesse, son), sous-titres (style, couleurs, position, label
+    « Partie N »), carte d'accroche, bande son (volume, pistes) ;
+  - **Planning** : horaires, fuseau, décalage aléatoire, validation manuelle, réserves ;
+  - **Comptes** : connexion YouTube / TikTok / Instagram et réglages de publication.
+- **Vidéo** : Publier maintenant, Programmer, Valider ou Jeter ; « Plus d'actions » pour Aperçu, Texte complet,
+  Régénérer, Archiver, Découper.
+- **Médias** : vidéos de fond et bande son (ajout par fichier ou par lien, envoyé à tout moment).
+- **Réglages** : Clés API, Plateformes, Réglages YouTube, Journal, État du système, mises à jour auto.
 
 **La Mini App** (optionnelle) s'ouvre dans Telegram : indicateurs du jour, graphique des publications
 (infobulle au toucher et vue tableau), vidéos à valider avec lecteur, chaînes avec interrupteurs, dernières
@@ -130,6 +139,14 @@ Seuls les comptes listés dans `TELEGRAM_ADMIN_IDS` peuvent utiliser le bot.
 - Un bot Telegram (créé avec [@BotFather](https://t.me/BotFather))
 - Une clé API ElevenLabs et une clé d'IA pour écrire les histoires : **Gemini ou Groq (gratuits)**, ou OpenAI (payant)
 - Pour publier : un projet Google Cloud (YouTube) et/ou une app TikTok for Developers
+
+### Clés API (IA et ElevenLabs) depuis Telegram
+
+Réglages → **Clés API** → Ajouter une clé : colle une clé Gemini (`AIza…`), Groq (`gsk_…`), OpenAI (`sk-…`),
+OpenRouter (`sk-or-…`) ou ElevenLabs (`sk_…`). Le bot reconnaît le fournisseur, vérifie la clé et supprime ton
+message. Mets-en plusieurs : elles sont essayées dans l'ordre (flèche ↑ pour réordonner) et si l'une échoue
+(quota, limite, clé invalide), la suivante prend le relais et tu es prévenu. Les clés déjà présentes dans le
+`.env` sont reprises automatiquement ; le `.env` n'a plus besoin que du token Telegram et de ton identifiant.
 
 ### Clés ElevenLabs de secours
 

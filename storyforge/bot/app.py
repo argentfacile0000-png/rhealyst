@@ -24,15 +24,7 @@ log = logging.getLogger(__name__)
 
 COMMANDS = [
     ("start", "Dashboard"),
-    ("channels", "Chaînes"),
-    ("generate", "Générer maintenant"),
-    ("queue", "File d'attente et planning"),
-    ("stats", "Statistiques"),
-    ("bank", "Banque vidéo"),
-    ("new", "Nouvelle chaîne"),
-    ("settings", "Réglages système"),
-    ("log", "Journal"),
-    ("help", "Aide"),
+    ("cancel", "Annuler une saisie"),
 ]
 
 

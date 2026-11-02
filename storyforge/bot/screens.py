@@ -26,11 +26,9 @@ from .ui import (
     PLATFORM,
     PUB_STATUS,
     VIDEO_STATUS,
-    bar,
     esc,
     hhmm,
     kb,
-    kfmt,
     mmss,
     muted,
     nav,
@@ -57,49 +55,37 @@ def _utc(dt):
 async def home(svc: Services) -> Screen:
     o = await overview(svc, recent_limit=0)
     t = o["today"]
-    lines = [
-        "<b>StoryForge</b>",
-        muted(f"{OFF} En pause · en ligne depuis {o['uptime']}" if o["paused"]
-              else f"{ON} Actif · en ligne depuis {o['uptime']}"),
-        "",
-        "<b>Aujourd'hui</b>",
-        row("Générées", t["generated"]),
-        row("Publiées", t["published"]) + "  " + muted(f"YouTube {t['youtube']}, TikTok {t['tiktok']}"),
-        row("À valider", o["pending_approval"]),
-        row("Échecs", t["failed"]),
-    ]
-
-    running = [j for j in o["jobs"] if j["status"] == "running"]
-    waiting = len(o["jobs"]) - len(running)
-    if o["jobs"]:
-        lines += ["", "<b>En cours</b>"]
-        lines += [f"{esc(j['label'])}  {muted(mmss(j['since']))}" for j in running[:3]]
-        if waiting:
-            lines.append(muted(f"{waiting} en attente"))
-
     chs = o["channels"]
-    active = sum(c["active"] for c in chs)
-    actives = f"{active} active{'s' if active > 1 else ''} sur {len(chs)}"
-    lines += ["", "<b>Chaînes</b>  " + muted(actives)]
-    if not chs:
-        lines.append(muted("Aucune chaîne. Crée la première pour commencer."))
-    for c in chs[:12]:
-        detail = f"{c['per_day']}/jour{DOT}prochain {c['next_slot']}" if c["active"] else "en pause"
-        lines.append(f"{ON if c['active'] else OFF} {esc(short(c['name'], 28))}  {muted(detail)}")
-
+    active = [c for c in chs if c["active"]]
+    lines = [
+        f"<b>StoryForge</b>  {muted(f'{OFF} En pause' if o['paused'] else f'{ON} Actif')}",
+        "",
+        row("À valider", o["pending_approval"]) + "   " + row("Prêtes", o["ready"]),
+        row("Aujourd'hui", f"{t['generated']} générées, {t['published']} publiées"
+            + (f", {t['failed']} échecs" if t["failed"] else "")),
+    ]
+    nxt = [c for c in active if c["next_slot"] != "—"]
+    if nxt:
+        lines.append(row("Prochaine publication", f"{nxt[0]['next_slot']}, {short(nxt[0]['name'], 24)}"))
+    lines.append(row("Chaînes actives", f"{len(active)} sur {len(chs)}"))
+    running = [j for j in o["jobs"] if j["status"] == "running"]
+    if running:
+        lines.append(row("En cours", f"{short(running[0]['label'], 36)}  {mmss(running[0]['since'])}"))
     q = o["quota"]
     if q and q.get("limit"):
         left = max(0, q["limit"] - q["used"])
-        credit = f"{num(left)} restants sur {num(q['limit'])}"
-        lines += ["", "<b>Crédits ElevenLabs</b>  " + muted(credit), f"<code>{bar(left / q['limit'], 16)}</code>"]
+        lines.append(row("Crédits ElevenLabs", f"{num(left)} sur {num(q['limit'])}"))
+    missing = svc.missing_prereqs()
+    if missing:
+        lines += ["", f"{CROSS} <b>À configurer</b> : {esc(', '.join(missing))}"]
+    elif not chs:
+        lines += ["", muted("Commence par créer une chaîne.")]
 
+    pending = o["pending_approval"]
     rows = [
-        [("Chaînes", "cl"), ("Nouvelle chaîne", "new")],
-        [("Générer", "gen"), ("File d'attente", "q")],
-        [("Banque vidéo", "bk"), ("Bande son", "mu")],
-        [("Statistiques", "st"), ("Journal", "ev")],
-        [("Réglages", "set"), ("Reprendre" if o["paused"] else "Pause globale", "sp")],
-        [("Actualiser", "h")],
+        [(f"À valider ({pending})" if pending else "Vidéos", "q"), ("Chaînes", "cl")],
+        [("Générer", "gen"), ("Médias", "md")],
+        [("Réglages", "set"), ("Reprendre" if o["paused"] else "Pause", "sp")],
     ]
     url = svc.settings.webapp_url
     if url:
@@ -178,13 +164,12 @@ async def channel_view(svc: Services, cid: int) -> Screen:
         return f"{CHECK} <b>{esc(account or 'lié')}</b>" if linked else muted("non lié")
 
     lines = [
-        f"<b>{esc(ch.name)}</b>",
-        muted(f"{ON} Active" if ch.active else f"{OFF} En pause") + f"  {muted(lang.label)}",
+        f"<b>{esc(ch.name)}</b>  " + muted(f"{ON} Active" if ch.active else f"{OFF} En pause") + f"  {muted(lang.label)}",
         "",
         "<b>Contenu</b>",
         row("Histoires", _formats_label(ch)),
-        row("Shorts", f"{ch.min_seconds}–{ch.max_seconds} s, {plural(ch.parts, 'partie')}" if ch.shorts_enabled
-            else "désactivés"),
+        row("Shorts", f"{ch.min_seconds}–{ch.max_seconds} s" + (f", parties de {ch.split_seconds} s" if ch.split_seconds
+                                                              else "") if ch.shorts_enabled else "désactivés"),
         row("Vidéos longues", f"{ch.long_min_minutes}–{ch.long_max_minutes} min, YouTube" if ch.long_enabled
             else "désactivées"),
         row("Voix", f"{ch.voice_name or ch.voice_id or 'par défaut'}"),
@@ -217,10 +202,10 @@ async def channel_view(svc: Services, cid: int) -> Screen:
 
     rows = [
         [("Mettre en pause" if ch.active else "Activer", f"ct:{cid}"), ("Générer", f"cg:{cid}")],
-        [("Réglages", f"ce:{cid}"), ("Vidéos", f"cvv:{cid}:0"), ("Archives", f"cva:{cid}:0")],
-        [("Comptes", f"ca:{cid}"), ("Publier la suivante", f"cp:{cid}")],
-        [("Supprimer", f"cd:{cid}")],
-        nav("cl", "← Chaînes"),
+        [("Contenu", f"cE:{cid}:content"), ("Apparence", f"cE:{cid}:look")],
+        [("Planning", f"cE:{cid}:plan"), ("Comptes", f"ca:{cid}")],
+        [("Vidéos", f"cvv:{cid}:0"), ("Archives", f"cva:{cid}:0"), ("Publier la suivante", f"cp:{cid}")],
+        [("← Chaînes", "cl"), ("Supprimer", f"cd:{cid}"), (HOME, "h")],
     ]
     return "\n".join(lines), kb(rows)
 
@@ -253,10 +238,9 @@ async def accounts(svc: Services, cid: int) -> Screen:
         lines.append(muted("Le lien est personnel et expire dans 30 minutes."))
         rows.append([("Ouvrir la page de connexion", svc.portal_link(cid))])
     else:
-        lines.append("Choisis la plateforme à connecter. Après l'autorisation, colle ici l'adresse de la page de retour.")
-        lines.append(muted("Pour une connexion en un clic, configure PUBLIC_URL et WEBAPP_ENABLED (voir le README)."))
-        rows.append([("Connecter YouTube", f"cy:{cid}"), ("Connecter TikTok", f"ck:{cid}")])
-        rows.append([("Connecter Instagram", f"ci:{cid}")])
+        lines.append(f"{CROSS} La page de connexion a besoin d'une adresse HTTPS : relance "
+                     "<code>bash install.sh --https</code> sur le serveur.")
+    rows.append([("Réglages de publication", f"cE:{cid}:pub")])
     if any(svc.platform_problem(p, cid) for p in ("youtube", "tiktok", "instagram")):
         rows.append([("Configurer les plateformes", "pf")])
     unlink = [(f"Déconnecter {PLATFORM[p]}", f"cu:{cid}:{p}")
@@ -268,12 +252,7 @@ async def accounts(svc: Services, cid: int) -> Screen:
 
 
 async def channel_edit(svc: Services, cid: int) -> Screen:
-    ch = await svc.get_channel(cid)
-    if ch is None:
-        return "Chaîne introuvable.", kb([nav("cl")])
-    rows = [[(label, f"cE:{cid}:{key}")] for key, label in GROUPS]
-    rows.append([(BACK, f"cv:{cid}")])
-    return f"{title('Réglages', ch.name)}\n\nQue veux-tu modifier ?", kb(rows)
+    return await channel_view(svc, cid)
 
 
 async def channel_group(svc: Services, cid: int, group: str) -> Screen:
@@ -287,7 +266,10 @@ async def channel_group(svc: Services, cid: int, group: str) -> Screen:
         val = f.value_text(ch)
         lines.append(row(f.label, val))
         rows.append([(f"{f.label} : {short(val, 24)}", f"cf:{cid}:{f.key}")])
-    rows.append([(BACK, f"ce:{cid}"), ("Chaîne", f"cv:{cid}")])
+    if group == "pub":
+        rows.append([("← Comptes", f"ca:{cid}"), (HOME, "h")])
+    else:
+        rows.append([("← Chaîne", f"cv:{cid}"), (HOME, "h")])
     return "\n".join(lines), kb(rows)
 
 
@@ -360,8 +342,7 @@ async def voice_picker(svc: Services, cid: int, voices: list[dict], page: int) -
         pager.append(("Suivantes →", f"vp:{cid}:{page + 1}"))
     if pager:
         rows.append(pager)
-    rows.append([("Saisir un ID de voix", f"vid:{cid}")])
-    rows.append([(BACK, f"cE:{cid}:voice")])
+    rows.append([(BACK, f"cE:{cid}:content")])
     return "\n".join(lines), kb(rows)
 
 
@@ -466,37 +447,43 @@ def can_split(video: Video) -> bool:
                                                          VideoStatus.ARCHIVED, VideoStatus.FAILED))
 
 
-def video_keyboard(video: Video, *, nav: bool = True) -> InlineKeyboardMarkup:  # noqa: F811
-    show_nav = nav
+def video_keyboard(video: Video, *, nav: bool = True, more: bool = False) -> InlineKeyboardMarkup:  # noqa: F811
     vid = video.id
     st = video.status
     rows: list[list] = []
-    if st == VideoStatus.PENDING_APPROVAL:
-        rows.append([("Publier maintenant", f"vn:{vid}"), ("Valider", f"va:{vid}")])
-        rows.append([("Programmer", f"vsc:{vid}"), ("Régénérer", f"vr:{vid}")])
-        rows.append([("Archiver", f"var:{vid}"), ("Jeter", f"vx:{vid}")])
-    elif st == VideoStatus.READY:
+    if st in (VideoStatus.PENDING_APPROVAL, VideoStatus.READY):
         rows.append([("Publier maintenant", f"vn:{vid}"), ("Programmer", f"vsc:{vid}")])
-        rows.append([("Archiver", f"var:{vid}"), ("Jeter", f"vx:{vid}")])
+        if st == VideoStatus.PENDING_APPROVAL:
+            rows.append([("Valider pour le planning", f"va:{vid}"), ("Jeter", f"vx:{vid}")])
+        else:
+            rows.append([("Jeter", f"vx:{vid}")])
     elif st == VideoStatus.SCHEDULED:
         rows.append([("Publier maintenant", f"vn:{vid}"), ("Changer la date", f"vsc:{vid}")])
-        rows.append([("Annuler la programmation", f"vsu:{vid}"), ("Archiver", f"var:{vid}")])
+        rows.append([("Annuler la programmation", f"vsu:{vid}")])
     elif st == VideoStatus.ARCHIVED:
-        rows.append([("Désarchiver", f"vua:{vid}"), ("Programmer", f"vsc:{vid}")] if video.file_path
-                    else [("Désarchiver", f"vua:{vid}")])
-        rows.append([("Jeter", f"vx:{vid}")])
+        rows.append([("Désarchiver", f"vua:{vid}"), ("Jeter", f"vx:{vid}")])
     elif st in (VideoStatus.FAILED, VideoStatus.PUBLISHED) and video.file_path:
         rows.append([("Republier les échecs", f"vn:{vid}"), ("Jeter", f"vx:{vid}")])
-        if st == VideoStatus.FAILED:
-            rows.append([("Archiver", f"var:{vid}")])
-    extra = [("Texte complet", f"vt:{vid}")]
-    if video.file_path or video.preview_path:
-        extra.insert(0, ("Aperçu", f"vf:{vid}"))
-    if can_split(video):
-        extra.append(("Découper", f"vsp:{vid}"))
-    rows.append(extra)
-    if show_nav:
-        rows.append([("Chaîne", f"cv:{video.channel_id}"), (HOME, "h")])
+    if more:
+        extra = []
+        if video.file_path or video.preview_path:
+            extra.append(("Aperçu", f"vf:{vid}"))
+        extra.append(("Texte complet", f"vt:{vid}"))
+        rows.append(extra)
+        extra = []
+        if st == VideoStatus.PENDING_APPROVAL:
+            extra.append(("Régénérer", f"vr:{vid}"))
+        if st not in (VideoStatus.ARCHIVED, VideoStatus.PUBLISHED, VideoStatus.PUBLISHING, VideoStatus.RENDERING):
+            extra.append(("Archiver", f"var:{vid}"))
+        if can_split(video):
+            extra.append(("Découper", f"vsp:{vid}"))
+        if extra:
+            rows.append(extra)
+        rows.append([("Moins", f"vml:{vid}")])
+    else:
+        rows.append([("Plus d'actions", f"vm:{vid}")])
+    if nav:
+        rows.append([("Chaîne", f"cv:{video.channel_id}"), ("Vidéos", "q"), (HOME, "h")])
     return kb(rows)
 
 
@@ -514,8 +501,9 @@ async def queue(svc: Services) -> Screen:
     chs = {c.id: c for c in await svc.list_channels()}
     running = [j for j in jobs if j.status == "running"]
     pending = [j for j in jobs if j.status != "running"]
-    lines = [title("File d'attente"), "", "<b>En cours</b>"]
-    lines += [esc(j.label) for j in running] or [muted("Rien en cours.")]
+    lines = [title("Vidéos")]
+    if running:
+        lines += ["", "<b>En cours</b>"] + [esc(j.label) for j in running]
     if pending:
         lines += ["", f"<b>En attente</b>  {muted(str(len(pending)))}"]
         lines += [esc(j.label) for j in pending[:8]]
@@ -523,11 +511,12 @@ async def queue(svc: Services) -> Screen:
     async with db.session() as s:
         waiting = list((await s.execute(
             select(Video).where(Video.status.in_([VideoStatus.PENDING_APPROVAL, VideoStatus.READY]))
-            .order_by(Video.channel_id, Video.story_id, Video.part_index).limit(20)
+            .order_by(Video.status != VideoStatus.PENDING_APPROVAL, Video.channel_id, Video.story_id,
+                      Video.part_index).limit(20)
         )).scalars().all())
     rows = []
     if waiting:
-        lines += ["", f"<b>En stock</b>  {muted(str(len(waiting)))}"]
+        lines += ["", f"<b>À valider et prêtes</b>  {muted(str(len(waiting)))}"]
         for v in waiting:
             glyph, label = VIDEO_STATUS.get(v.status, ("·", ""))
             name = chs[v.channel_id].name if v.channel_id in chs else "?"
@@ -557,44 +546,10 @@ async def queue(svc: Services) -> Screen:
             name = chs[cid].name if cid in chs else f"#{cid}"
             tag = "  " + muted("vidéo longue") if kind == VideoFormat.HORIZONTAL else ""
             lines.append(f"{when.astimezone(zone):%d/%m %H:%M}  {esc(short(name, 28))}{tag}")
+    if not (running or pending or waiting or planned):
+        lines += ["", muted("Aucune vidéo en attente. Lance une génération depuis l'accueil.")]
     rows.append([("Actualiser", "q"), (HOME, "h")])
     return "\n".join(lines), kb(rows)
-
-
-# ---------------------------------------------------------------------------- stats
-async def stats(svc: Services) -> Screen:
-    o = await overview(svc, recent_limit=0, days=14)
-    ser = o["series"]
-    total_p, total_g = sum(ser["published"]), sum(ser["generated"])
-    hi = max(ser["published"] + [1])
-    chart = []
-    for label, p in list(zip(ser["labels"], ser["published"]))[-10:]:
-        size = int(round(p / hi * 14))
-        chart.append(f"{label}  {'█' * size}{'·' * (14 - size)}  {p:>2}")
-    lines = [
-        title("Statistiques"),
-        muted(f"14 jours · {plural(total_p, 'publication')} · {plural(total_g, 'vidéo générée', 'vidéos générées')}"),
-        "",
-        "<b>Publications par jour</b>",
-        "<pre>" + "\n".join(chart) + "</pre>",
-        "",
-        "<b>Aujourd'hui par chaîne</b>",
-    ]
-    for c in o["channels"]:
-        planned = f" sur {c['per_day']} prévues"
-        lines.append(f"{esc(short(c['name'], 26))}  <b>{c['today']}</b>" + muted(planned))
-    if not o["channels"]:
-        lines.append(muted("Aucune chaîne."))
-    t = o["today"]
-    lines += ["", "<b>Consommation du jour</b>",
-              row(svc.settings.llm.label, f"{kfmt(t['openai_tokens'])} tokens"),
-              row("ElevenLabs", f"{kfmt(t['tts_chars'])} caractères")]
-    q = o["quota"]
-    if q and q.get("limit"):
-        left = max(0, q["limit"] - q["used"])
-        lines += [row("Forfait", q.get("tier", "") or "—") + "  " + muted(f"{num(left)} caractères restants"),
-                  f"<code>{bar(left / q['limit'], 16)}</code>"]
-    return "\n".join(lines), kb([[("Actualiser", "st"), (HOME, "h")]])
 
 
 # ---------------------------------------------------------------------------- banque vidéo
@@ -617,7 +572,7 @@ async def bank(svc: Services) -> Screen:
     lines.append(row("Ajout par lien", "disponible" if ytdlp_command() else "yt-dlp non installé"))
     lines += ["", muted("Astuce : envoie un lien à tout moment, le bot te propose où l'ajouter.")]
     return "\n".join(lines), kb([[("Ajouter (fichier ou lien)", "bka"), ("Rescanner", "bk")],
-                                 [("Réglages YouTube (cookies, proxies)", "yt")], nav()])
+                                 [("Réglages YouTube (cookies, proxies)", "yt")], [("← Médias", "md"), (HOME, "h")]])
 
 
 async def ytdlp_settings(svc: Services) -> Screen:
@@ -671,7 +626,7 @@ async def ytdlp_settings(svc: Services) -> Screen:
             [("Envoyer une liste (.txt)", "ytl")]
             + ([("Retester la liste", "ytlt"), ("Retirer la liste", "ytlx")] if plist["list"] else []),
             [("Tester avec YouTube", "ytt"), ("Ajouter une vidéo", "bka")],
-            [("← Banque vidéo", "bk"), (HOME, "h")]]
+            [("← Médias", "md"), ("← Réglages", "set")]]
     return "\n".join(lines), kb(rows)
 
 
@@ -697,11 +652,11 @@ async def music_bank(svc: Services) -> Screen:
             state = (f"{round(c.music_volume * 100)} %, {plural_tracks(c.music_tracks)}" if c.music_volume > 0
                      else "coupée")
             lines.append(row(short(c.name, 24), state))
-        lines.append(muted("Réglage par chaîne : Chaîne, Réglages, Vidéo."))
+        lines.append(muted("Réglage par chaîne : Chaîne, Apparence."))
     rows.insert(0, [("Ajouter une piste", "mua")])
     if tracks and chs and not any(c.music_volume > 0 for c in chs):
         rows.insert(1, [("Activer sur toutes les chaînes (8 %)", "mue")])
-    rows.append(nav())
+    rows.append([("← Médias", "md"), (HOME, "h")])
     return "\n".join(lines), kb(rows)
 
 
@@ -738,38 +693,109 @@ async def bank_categories(svc: Services) -> Screen:
 # ---------------------------------------------------------------------------- réglages / journal
 async def settings_screen(svc: Services) -> Screen:
     s = svc.settings
-    paused = await svc.is_paused()
-    live = bool(await db.kv_get("live_auto", False))
+    ai = svc.pipeline.llm_keys
+    el = svc.pipeline.tts.keys
+    ai_ok = len(ai.available()) if ai else 0
+    el_ok = len(el.available()) if el else 0
     lines = [
-        title("Réglages système"),
+        title("Réglages"),
         "",
-        row("Système", "en pause" if paused else "actif"),
-        row("Suivi en direct des générations auto", "activé" if live else "désactivé"),
-        "",
-        "<b>Configuration</b>",
-        row("IA des histoires", f"{s.llm.label}, {s.llm.model}" + (" (gratuit)" if s.llm.free else "")),
-        row("ElevenLabs", s.elevenlabs_model),
-        row("Rendu", f"{s.video_width}×{s.video_height}, CRF {s.video_crf}, {s.max_concurrent_renders} à la fois"),
-        row("Conservation des fichiers", plural(s.keep_videos_days, "jour")),
-        row("Fuseau", s.timezone),
-        row("Mini App", s.webapp_url or "non configurée"),
+        row("Clés d'IA", f"{ai_ok} active{'s' if ai_ok > 1 else ''} sur {len(ai.all()) if ai else 0}"),
+        row("Clés ElevenLabs", f"{el_ok} active{'s' if el_ok > 1 else ''} sur {len(el.all()) if el else 0}"),
+        row("Plateformes", ", ".join(p for p in ("YouTube", "TikTok", "Instagram")
+                                    if svc.apps.source(p.lower())) or "aucune configurée"),
+        row("Mini App", "en ligne" if s.webapp_url else "non configurée"),
     ]
     version = deployed_version()
+    auto = s.auto_update and not auto_update_flag(s.data_dir).exists()
+    if version:
+        lines.append(row("Version", version["short"]) + "  " + muted("mises à jour auto" if auto else "mises à jour suspendues"))
     rows = [
-        [("Reprendre" if paused else "Pause globale", "sp"), ("Suivi en direct", "slv")],
-        [("Diagnostic", "stt"), ("Journal", "ev")],
-        [("Plateformes", "pf"), ("Clés ElevenLabs", "ek")],
+        [("Clés API", "ak"), ("Plateformes", "pf")],
+        [("Réglages YouTube", "yt"), ("Journal", "ev")],
+        [("État du système", "stt")],
     ]
     if version:
-        auto = s.auto_update and not auto_update_flag(s.data_dir).exists()
-        lines += [
-            "",
-            "<b>Version</b>",
-            row("Installée", version["short"]) + ("  " + muted(short(version["message"], 60)) if version["message"] else ""),
-            row("Mises à jour auto", "activées, à chaque push GitHub" if auto else "suspendues"),
-        ]
-        rows.append([("Suspendre les mises à jour" if auto else "Réactiver les mises à jour", "sau")])
+        rows.append([("Suspendre les mises à jour auto" if auto else "Réactiver les mises à jour auto", "sau")])
     rows.append(nav())
+    return "\n".join(lines), kb(rows)
+
+
+async def api_keys(svc: Services) -> Screen:
+    """Clés d'IA et ElevenLabs : ajoutées depuis le bot, essayées dans l'ordre, bascule automatique."""
+    zone = tz(svc)
+    ai = svc.pipeline.llm_keys
+    lines = [title("Clés API"),
+             muted("Ajoute plusieurs clés : si l'une échoue (quota, limite, clé invalide), la suivante prend "
+                   "le relais et je te préviens. Tes messages contenant une clé sont supprimés."), "",
+             "<b>IA qui écrit les histoires</b>"]
+    rows: list[list] = [[("Ajouter une clé", "aka")]]
+    keys = ai.all() if ai else []
+    if not keys:
+        lines.append(muted("Aucune clé. Gratuit : Gemini (aistudio.google.com/apikey) ou Groq (console.groq.com/keys)."))
+    for i, k in enumerate(keys, start=1):
+        st = ai.status(k)
+        if st:
+            until = datetime.fromtimestamp(st["until"], timezone.utc).replace(tzinfo=None)
+            state = (f"{CROSS} invalide" if st["reason"] == "invalide"
+                     else f"{st['reason']}, reprise {human_when(until, zone)}")
+        else:
+            state = f"{CHECK} en cours" if ai.current == k.kid else "prête"
+        src = "  " + muted(".env") if k.source == "env" else ""
+        lines.append(f"{i}. <b>{esc(k.label)}</b>  <code>{esc(k.masked)}</code>  {state}{src}")
+        btns = []
+        if st:
+            btns.append((f"Réactiver {i}", f"akr:{k.kid}"))
+        if k.source == "bot":
+            if i > 1:
+                btns.append((f"↑ {i}", f"aku:{k.kid}"))
+            btns.append((f"Retirer {i}", f"akd:{k.kid}"))
+        if btns:
+            rows.append(btns)
+    lines += ["", "<b>ElevenLabs (voix)</b>"]
+    el = svc.pipeline.tts.keys
+    ekeys = el.all() if el else []
+    if not ekeys:
+        lines.append(muted("Aucune clé. Crée-la sur elevenlabs.io, Profil, API Keys."))
+    for i, k in enumerate(ekeys, start=1):
+        st = el.status(k)
+        state = (f"{CROSS} {st.get('reason', 'indisponible')}" if st
+                 else (f"{CHECK} en cours" if el.current == k.kid else "prête"))
+        src = "  " + muted(".env") if k.source == "env" else ""
+        lines.append(f"{i}. <code>{esc(k.masked)}</code>  {state}{src}")
+    if ekeys:
+        rows.append([("Crédits et gestion ElevenLabs", "ek")])
+    if any(k.source == "env" for k in keys + ekeys) or svc.pipeline.llm_keys.env_keys() or (el and el.env_keys()):
+        lines += ["", muted("Les clés du .env sont reprises ici automatiquement ; pour en retirer une définitivement, "
+                            "efface-la aussi du .env du serveur.")]
+    rows.append([("← Réglages", "set"), (HOME, "h")])
+    return "\n".join(lines), kb(rows)
+
+
+async def media(svc: Services) -> Screen:
+    """Banque vidéo et bande son sur un seul écran."""
+    summary = await svc.pipeline.bank.summary()
+    tracks = await svc.pipeline.music.summary()
+    lines = [title("Médias"), "", "<b>Vidéos de fond</b>"]
+    if summary:
+        total = sum(i["seconds"] for i in summary.values())
+        for cat, info in sorted(summary.items()):
+            lines.append(f"{esc(cat)}  <b>{plural(info['files'], 'vidéo')}</b>  {muted(hhmm(info['seconds']))}")
+        lines.append(muted(f"Total {hhmm(total)}"))
+    else:
+        lines.append(muted("Aucune vidéo de fond : ajoutes-en une pour pouvoir générer."))
+    lines += ["", "<b>Bande son</b>"]
+    if tracks:
+        lines.append(f"{plural(len(tracks), 'piste')}  {muted(hhmm(sum(d for _, d in tracks)))}")
+    else:
+        lines.append(muted("Aucune piste."))
+    lines += ["", muted("Astuce : envoie un lien ou un fichier au bot à tout moment, il te propose où l'ajouter.")]
+    rows = [
+        [("Ajouter une vidéo", "bka"), ("Ajouter une piste", "mua")],
+        [("Détail des vidéos", "bk"), ("Pistes", "mu")],
+        [("Réglages YouTube", "yt")],
+        nav(),
+    ]
     return "\n".join(lines), kb(rows)
 
 
@@ -916,7 +942,7 @@ async def events(svc: Services) -> Screen:
         lines.append(f"{glyphs.get(e.level, '·')} {esc(short(e.text, 140))}  {muted(human_delta(e.ts, zone))}")
     if not evs:
         lines.append(muted("Rien pour l'instant."))
-    return "\n".join(lines)[:4000], kb([[("Actualiser", "ev"), (HOME, "h")]])
+    return "\n".join(lines)[:4000], kb([[("Actualiser", "ev"), ("← Réglages", "set"), (HOME, "h")]])
 
 
 # ---------------------------------------------------------------------------- découpage / programmation
@@ -999,5 +1025,5 @@ async def elevenlabs_keys(svc: Services) -> Screen:
     if q and q.get("limit"):
         lines += ["", row("Total", f"{num(max(0, q['limit'] - q['used']))} caractères restants")]
     rows.insert(0, [("Ajouter une clé", "eka")])
-    rows.append([("← Réglages", "set"), (HOME, "h")])
+    rows.append([("← Clés API", "ak"), (HOME, "h")])
     return "\n".join(lines), kb(rows)

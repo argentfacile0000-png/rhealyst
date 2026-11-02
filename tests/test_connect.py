@@ -160,7 +160,7 @@ async def test_bot_accounts_screen(svc):
     ctx, _ = make_ctx(svc)
     ch = await svc.create_channel("Sans portail")
     q = await click(ctx, f"ca:{ch.id}")
-    assert "Comptes" in q.edits[-1] and "colle ici" in q.edits[-1]
+    assert "Comptes" in q.edits[-1] and "HTTPS" in q.edits[-1]
 
     svc.settings.webapp_enabled = True
     svc.settings.public_url = PUBLIC

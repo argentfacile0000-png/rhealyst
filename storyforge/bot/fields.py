@@ -41,13 +41,24 @@ class Field:
 
 
 GROUPS: list[tuple[str, str]] = [
-    ("formats", "Formats"),
-    ("story", "Histoire"),
-    ("voice", "Voix"),
-    ("video", "Vidéo"),
+    ("content", "Contenu"),
+    ("look", "Apparence"),
     ("plan", "Planning"),
     ("pub", "Publication"),
 ]
+
+# Rythme de narration : vitesse de la voix, accélération au montage et expressivité réglées ensemble.
+PACES = {
+    "calm": ("Calme", {"voice_speed": 1.0, "speedup": 1.0, "voice_stability": 0.6}),
+    "natural": ("Naturel", {"voice_speed": 1.05, "speedup": 1.1, "voice_stability": 0.5}),
+    "dynamic": ("Dynamique", {"voice_speed": 1.1, "speedup": 1.2, "voice_stability": 0.45}),
+    "fast": ("Très rapide", {"voice_speed": 1.15, "speedup": 1.3, "voice_stability": 0.4}),
+}
+
+
+def current_pace(ch: Channel) -> str:
+    return min(PACES, key=lambda k: abs(PACES[k][1]["speedup"] - (ch.speedup or 1.0))
+               + abs(PACES[k][1]["voice_speed"] - (ch.voice_speed or 1.0)))
 
 
 def _name(text: str) -> dict[str, Any]:
@@ -80,10 +91,6 @@ def _tz(text: str) -> dict[str, Any]:
     return {"timezone": t}
 
 
-def _tt_account(text: str) -> dict[str, Any]:
-    return {"tiktok_account": text.strip().lstrip("@")[:100]}
-
-
 def _long_duration_apply(v: str) -> dict[str, Any]:
     lo, hi = (int(x) for x in v.split("-"))
     return {"long_min_minutes": lo, "long_max_minutes": hi}
@@ -101,6 +108,16 @@ def plural_tracks(tracks: list[str] | None) -> str:
     return "toutes, au hasard" if not n else f"{n} piste{'s' if n > 1 else ''} choisie{'s' if n > 1 else ''}"
 
 
+def _speed(text: str) -> dict[str, Any]:
+    try:
+        value = float(text.strip().lower().rstrip("x×").replace(",", "."))
+    except ValueError:
+        raise ValueError("Envoie un nombre, par exemple 1,3")
+    if not 0.25 <= value <= 4:
+        raise ValueError("La vitesse doit être entre 0,25 et 4")
+    return {"bg_speed": round(value, 2)}
+
+
 def _duration_apply(v: str) -> dict[str, Any]:
     lo, hi = (int(x) for x in v.split("-"))
     return {"min_seconds": lo, "max_seconds": hi}
@@ -110,92 +127,84 @@ COLORS = [("Blanc", "#FFFFFF"), ("Jaune", "#FFE14D"), ("Vert", "#4DFF88"), ("Cya
           ("Rose", "#FF6FD8"), ("Orange", "#FF9F1C")]
 
 FIELDS: list[Field] = [
-    # --- Formats
-    Field("shorts_enabled", "Shorts verticaux (YouTube, TikTok, Reels)", "formats", "toggle"),
-    Field("split_seconds", "Découpage auto des Shorts", "formats", "choice",
-          options=[("Désactivé", 0), ("Parties de 60 s", 60), ("Parties de 90 s", 90), ("Parties de 120 s", 120)]),
-    Field("long_enabled", "Vidéos longues YouTube (16:9)", "formats", "toggle"),
-    Field("long_duration", "Durée des vidéos longues", "formats", "choice",
-          options=[("5–8 min", "5-8"), ("8–12 min", "8-12"), ("12–20 min", "12-20"), ("20–30 min", "20-30")],
-          current=lambda c: f"{c.long_min_minutes}-{c.long_max_minutes}",
-          show=lambda c: f"{c.long_min_minutes}–{c.long_max_minutes} min", apply=_long_duration_apply),
-    Field("long_schedule_times", "Horaires des vidéos longues", "formats", "text", parse=_long_times,
-          show=lambda c: ", ".join(c.long_schedule_times or []) or "aucun",
-          hint="Envoie les heures de publication des vidéos longues.\n<i>Exemple : 20:00</i>\n\n"
-               "<i>Une minute de narration consomme environ 1 000 à 1 500 caractères ElevenLabs.</i>"),
-    Field("long_buffer_size", "Réserve de vidéos longues", "formats", "choice",
-          options=[("1", 1), ("2", 2), ("3", 3)]),
-    # --- Histoire
-    Field("name", "Nom", "story", "text", parse=_name, hint="Envoie le nouveau nom de la chaîne."),
-    Field("language", "Langue", "story", "choice",
+    # --- Contenu : quoi raconter, sous quels formats, avec quelle voix
+    Field("name", "Nom", "content", "text", parse=_name, hint="Envoie le nouveau nom de la chaîne."),
+    Field("language", "Langue", "content", "choice",
           options=[(l.label, l.code) for l in LANGUAGES.values()]),
-    Field("formats", "Formats", "story", "multi",
+    Field("formats", "Types d'histoires", "content", "multi",
           options=[(f.label, f.key) for f in FORMATS.values()],
           show=lambda c: ", ".join(FORMATS[f].label for f in c.formats if f in FORMATS) or "par défaut"),
-    Field("narrator_gender", "Narrateur", "story", "choice",
+    Field("narrator_gender", "Narrateur", "content", "choice",
           options=[("Au hasard", "any"), ("Femme", "female"), ("Homme", "male")]),
-    Field("parts", "Parties", "story", "choice",
-          options=[("1 (vidéo unique)", 1), ("2 parties", 2), ("3 parties", 3), ("4 parties", 4)]),
-    Field("duration", "Durée", "story", "choice",
+    Field("custom_instructions", "Consignes", "content", "text", parse=_custom,
+          show=lambda c: "définies" if c.custom_instructions else "aucune",
+          hint="Envoie des consignes éditoriales pour cette chaîne : thèmes, ton, interdits.\n"
+               "<i>Exemple : histoires de mariage uniquement, ton sarcastique. Envoie « - » pour effacer.</i>"),
+    Field("voice", "Voix", "content", "voice", show=lambda c: c.voice_name or c.voice_id or "par défaut"),
+    Field("pace", "Rythme de narration", "content", "choice",
+          options=[(label, key) for key, (label, _) in PACES.items()],
+          current=current_pace, show=lambda c: PACES[current_pace(c)][0], apply=lambda v: dict(PACES[v][1])),
+    Field("shorts_enabled", "Shorts verticaux", "content", "toggle"),
+    Field("duration", "Durée des Shorts", "content", "choice",
           options=[("30–45 s", "30-45"), ("45–60 s", "45-60"), ("65–95 s", "65-95"), ("90–120 s", "90-120"),
                    ("120–170 s", "120-170")],
           current=lambda c: f"{c.min_seconds}-{c.max_seconds}",
           show=lambda c: f"{c.min_seconds}–{c.max_seconds} s", apply=_duration_apply),
-    Field("custom_instructions", "Consignes", "story", "text", parse=_custom,
-          show=lambda c: "définies" if c.custom_instructions else "aucune",
-          hint="Envoie des consignes éditoriales pour cette chaîne : thèmes, ton, interdits.\n"
-               "<i>Exemple : histoires de mariage uniquement, ton sarcastique. Envoie « - » pour effacer.</i>"),
-    # --- Voix
-    Field("voice", "Voix", "voice", "voice", show=lambda c: c.voice_name or c.voice_id or "par défaut"),
-    Field("voice_speed", "Vitesse voix", "voice", "choice",
-          options=[("0,9×", 0.9), ("1×", 1.0), ("1,05×", 1.05), ("1,1×", 1.1), ("1,15×", 1.15), ("1,2×", 1.2)]),
-    Field("speedup", "Accélération au montage", "voice", "choice",
-          options=[("Aucune", 1.0), ("1,1×", 1.1), ("1,15×", 1.15), ("1,2×", 1.2), ("1,25×", 1.25), ("1,3×", 1.3),
-                   ("1,4×", 1.4)]),
-    Field("voice_stability", "Expressivité", "voice", "choice",
-          options=[("Très expressive", 0.3), ("Expressive", 0.45), ("Équilibrée", 0.6), ("Stable", 0.75)]),
-    # --- Vidéo
-    Field("bg_categories", "Vidéos de fond", "video", "multi",
+    Field("split_seconds", "Découpage en parties", "content", "choice",
+          options=[("Désactivé", 0), ("Parties de 60 s", 60), ("Parties de 90 s", 90), ("Parties de 120 s", 120)]),
+    Field("long_enabled", "Vidéos longues YouTube", "content", "toggle"),
+    Field("long_duration", "Durée des vidéos longues", "content", "choice",
+          options=[("5–8 min", "5-8"), ("8–12 min", "8-12"), ("12–20 min", "12-20"), ("20–30 min", "20-30")],
+          current=lambda c: f"{c.long_min_minutes}-{c.long_max_minutes}",
+          show=lambda c: f"{c.long_min_minutes}–{c.long_max_minutes} min", apply=_long_duration_apply),
+    # --- Apparence : fond, sous-titres, son
+    Field("bg_categories", "Vidéos de fond", "look", "multi",
           show=lambda c: ", ".join(c.bg_categories) if c.bg_categories else "toutes"),
-    Field("caption_style", "Style sous-titres", "video", "choice",
+    Field("caption_style", "Sous-titres", "look", "choice",
           options=[("1 mot à la fois", "pop"), ("3 mots, mot actif surligné", "trio")]),
-    Field("caption_color", "Couleur du texte", "video", "choice", options=COLORS),
-    Field("highlight_color", "Couleur surlignage", "video", "choice", options=COLORS),
-    Field("caption_position", "Position du texte", "video", "choice",
+    Field("caption_color", "Couleur du texte", "look", "choice", options=COLORS),
+    Field("highlight_color", "Couleur surlignage", "look", "choice", options=COLORS),
+    Field("caption_position", "Position du texte", "look", "choice",
           options=[("Haut", 30), ("Centre", 50), ("Bas", 68)]),
-    Field("show_part_label", "Label « Partie N »", "video", "toggle"),
-    Field("hook_card", "Carte d'accroche", "video", "toggle"),
-    Field("music_volume", "Bande son", "video", "choice",
+    Field("show_part_label", "Label « Partie N »", "look", "toggle"),
+    Field("hook_card", "Carte d'accroche", "look", "toggle"),
+    Field("music_volume", "Bande son", "look", "choice",
           options=[("Aucune", 0.0), ("Très discrète 5 %", 0.05), ("Discrète 8 %", 0.08), ("12 %", 0.12),
                    ("15 %", 0.15), ("20 %", 0.2), ("30 %", 0.3)]),
-    Field("music_tracks", "Pistes de la bande son", "video", "multi",
+    Field("music_tracks", "Pistes de la bande son", "look", "multi",
           show=lambda c: plural_tracks(c.music_tracks)),
-    Field("bg_volume", "Son du fond", "video", "choice",
+    Field("bg_speed", "Vitesse de la vidéo de fond", "look", "choice",
+          options=[("0,5×", 0.5), ("0,75×", 0.75), ("Normale", 1.0), ("1,25×", 1.25), ("1,5×", 1.5), ("2×", 2.0),
+                   ("Personnalisée…", "custom")],
+          show=lambda c: "normale" if (c.bg_speed or 1.0) == 1.0 else f"{c.bg_speed:g}×".replace(".", ","),
+          parse=_speed, hint="Envoie la vitesse de la vidéo de fond, entre 0,25 et 4.\n<i>Exemples : 1,3 ou 0.8</i>"),
+    Field("bg_volume", "Son de la vidéo de fond", "look", "choice",
           options=[("Coupé", 0.0), ("5 %", 0.05), ("10 %", 0.1), ("20 %", 0.2)]),
-    # --- Planning
-    Field("schedule_times", "Horaires", "plan", "text", parse=_times,
+    # --- Planning : quand produire et publier
+    Field("schedule_times", "Horaires des Shorts", "plan", "text", parse=_times,
           show=lambda c: ", ".join(c.schedule_times) or "aucun",
           hint="Envoie les heures de publication.\n<i>Exemple : 9:00, 13:30, 19:00</i>"),
-    Field("timezone", "Fuseau horaire", "plan", "text", parse=_tz, hint="Envoie le fuseau horaire.\n<i>Exemple : Europe/Paris</i>"),
+    Field("long_schedule_times", "Horaires des vidéos longues", "plan", "text", parse=_long_times,
+          show=lambda c: ", ".join(c.long_schedule_times or []) or "aucun",
+          hint="Envoie les heures de publication des vidéos longues.\n<i>Exemple : 20:00</i>\n\n"
+               "<i>Une minute de narration consomme environ 1 000 à 1 500 caractères ElevenLabs.</i>"),
+    Field("timezone", "Fuseau horaire", "plan", "text", parse=_tz,
+          hint="Envoie le fuseau horaire.\n<i>Exemple : Europe/Paris</i>"),
     Field("jitter_minutes", "Décalage aléatoire", "plan", "choice",
-          options=[("Aucune", 0), ("5 min", 5), ("10 min", 10), ("20 min", 20), ("40 min", 40)]),
+          options=[("Aucun", 0), ("5 min", 5), ("10 min", 10), ("20 min", 20), ("40 min", 40)]),
     Field("approval_required", "Validation manuelle", "plan", "toggle"),
-    Field("buffer_size", "Réserve", "plan", "choice",
+    Field("buffer_size", "Réserve de Shorts", "plan", "choice",
           options=[("1", 1), ("2", 2), ("3", 3), ("5", 5), ("8", 8)]),
-    # --- Publication
+    Field("long_buffer_size", "Réserve de vidéos longues", "plan", "choice",
+          options=[("1", 1), ("2", 2), ("3", 3)]),
+    # --- Publication (depuis Comptes)
     Field("youtube_enabled", "YouTube", "pub", "toggle"),
     Field("youtube_privacy", "Visibilité YouTube", "pub", "choice",
           options=[("Publique", "public"), ("Non répertoriée", "unlisted"), ("Privée", "private")]),
     Field("tiktok_enabled", "TikTok", "pub", "toggle"),
     Field("tiktok_mode", "Mode TikTok", "pub", "choice",
           options=[("Publication directe", "direct"), ("Brouillon dans l'app", "draft")]),
-    Field("tiktok_privacy", "Visibilité TikTok", "pub", "choice",
-          options=[("Tout le monde", "PUBLIC_TO_EVERYONE"), ("Abonnés", "FOLLOWER_OF_CREATOR"),
-                   ("Amis", "MUTUAL_FOLLOW_FRIENDS"), ("Moi seul", "SELF_ONLY")]),
     Field("instagram_enabled", "Instagram", "pub", "toggle"),
-    Field("tiktok_account", "Pseudo TikTok", "pub", "text", parse=_tt_account,
-          show=lambda c: f"@{c.tiktok_account}" if c.tiktok_account else "non défini",
-          hint="Envoie ton pseudo TikTok (il sert à construire les liens des vidéos)."),
 ]
 
 FIELD_MAP: dict[str, Field] = {f.key: f for f in FIELDS}

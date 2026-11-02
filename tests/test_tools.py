@@ -161,6 +161,9 @@ async def test_archive_and_schedule_flow(svc, monkeypatch):
 @needs_ffmpeg
 async def test_elevenlabs_key_failover(svc, monkeypatch):
     svc.settings.elevenlabs_api_key = "sk_principale_aaaaaaaaaaaaaaaaaaaa"
+    from storyforge import db
+
+    await db.kv_set("elevenlabs_keys", [])  # repart d'un trousseau vide (la clé de test du démarrage y a été importée)
     ring = KeyRing(svc.settings)
     await ring.load()
     await ring.add("sk_secours_bbbbbbbbbbbbbbbbbbbbbbbbb")
@@ -196,7 +199,7 @@ async def test_elevenlabs_key_failover(svc, monkeypatch):
     # La clé épuisée n'est plus essayée
     seen.clear()
     await client._tts_chunk("Encore", "voice", el.VoiceSettings(), "", "")
-    assert all(k == "sk_sec" for k, _ in seen)
+    assert all(k == "sk_sec" for k, _ in seen), seen
 
     # Plus aucune clé : message clair
     await ring.mark_exhausted(ring.all()[1], time.time() + 3600, "quota_exceeded")
@@ -219,13 +222,13 @@ async def test_bot_elevenlabs_keys_screen(svc, monkeypatch):
 
     monkeypatch.setattr(svc.pipeline.tts, "subscription", fake_sub)
     q = await click(ctx, "ek")
-    assert "Clés ElevenLabs" in q.edits[-1] and ".env" in q.edits[-1]
+    assert "Clés ElevenLabs" in q.edits[-1]
     await click(ctx, "eka")
     msg = await type_text(ctx, "sk_bad_cccccccccccccccccccccccccc")
     assert any("refusée" in r for r in msg.replies)
     await type_text(ctx, "sk_nouvelle_dddddddddddddddddddddd")
     keys = svc.pipeline.tts.keys.all()
-    assert [k.source for k in keys] == ["env", "bot"]
+    assert len(keys) == 2 and keys[-1].key == "sk_nouvelle_dddddddddddddddddddddd"
     assert any("Clé ajoutée" in t for t in bot.sent)
     await click(ctx, f"ekd:{keys[1].kid}")
     assert len(svc.pipeline.tts.keys.all()) == 1

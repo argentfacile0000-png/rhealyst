@@ -30,8 +30,24 @@ class RenderJob:
     music_volume: float = 0.0
     music_start: float = 0.0  # départ dans la piste (s)
     bg_volume: float = 0.0
+    bg_speed: float = 1.0  # vitesse de lecture de la vidéo de fond
     width: int = 0  # 0 = réglages (vertical) ; 1920×1080 pour une vidéo longue
     height: int = 0
+
+
+def _atempo(speed: float) -> str:
+    """Filtre audio qui suit la vitesse de la vidéo (atempo accepte 0,5 à 2 : on enchaîne si besoin)."""
+    if speed == 1.0:
+        return ""
+    parts, s = [], speed
+    while s > 2.0:
+        parts.append(2.0)
+        s /= 2.0
+    while s < 0.5:
+        parts.append(0.5)
+        s /= 0.5
+    parts.append(s)
+    return "".join(f"atempo={p:.4f}," for p in parts)
 
 
 def _link_fonts(workdir: Path, fonts_dir: Path) -> str:
@@ -57,7 +73,8 @@ async def render(job: RenderJob, settings: Settings, on_progress: ProgressCb | N
         args += ["-stream_loop", "-1"]
     else:
         args += ["-ss", f"{seg.start:.3f}"]
-    args += ["-t", f"{job.duration + 0.5:.3f}", "-i", str(seg.path.resolve())]
+    speed = min(4.0, max(0.25, job.bg_speed or 1.0))
+    args += ["-t", f"{(job.duration + 0.5) * speed:.3f}", "-i", str(seg.path.resolve())]
     # 1: narration
     args += ["-i", str(job.narration.resolve())]
     inputs = 2
@@ -75,7 +92,7 @@ async def render(job: RenderJob, settings: Settings, on_progress: ProgressCb | N
         inputs += 1
 
     vf = [
-        f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps={fps},format=yuv420p[bg]"
+        f"[0:v]{f'setpts=PTS/{speed:.4f},' if speed != 1.0 else ''}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},setsar=1,fps={fps},format=yuv420p[bg]"
     ]
     last = "bg"
     if card_idx is not None:
@@ -89,7 +106,7 @@ async def render(job: RenderJob, settings: Settings, on_progress: ProgressCb | N
     af = ["[1:a]aresample=44100,aformat=channel_layouts=stereo[narr]"]
     mix = ["[narr]"]
     if job.bg_volume > 0 and await probe_has_audio(seg.path):
-        af.append(f"[0:a]aresample=44100,aformat=channel_layouts=stereo,volume={job.bg_volume:.3f}[bga]")
+        af.append(f"[0:a]aresample=44100,aformat=channel_layouts=stereo,{_atempo(speed)}volume={job.bg_volume:.3f}[bga]")
         mix.append("[bga]")
     if music_idx is not None:
         # Fondu d'entrée et de sortie : la bande son ne démarre ni ne s'arrête brutalement

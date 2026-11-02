@@ -137,11 +137,11 @@ if [ ! -s "$APP/.env" ] || ! grep -q '^TELEGRAM_BOT_TOKEN=.' "$APP/.env"; then
   echo "  Les clés sont enregistrées uniquement sur ce serveur ($APP/.env, lisible par toi seul)."
   ask TELEGRAM_BOT_TOKEN "Token du bot Telegram (BotFather)" secret
   ask TELEGRAM_ADMIN_IDS "Ton identifiant Telegram (plusieurs : 111,222)"
-  ask ELEVENLABS_API_KEY "Clé API ElevenLabs" secret
+  ask ELEVENLABS_API_KEY "Clé API ElevenLabs (Entrée pour l'ajouter plus tard depuis Telegram)" secret optional
   umask 077
   set_env TELEGRAM_BOT_TOKEN "$TELEGRAM_BOT_TOKEN"
   set_env TELEGRAM_ADMIN_IDS "$TELEGRAM_ADMIN_IDS"
-  set_env ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
+  [ -n "${ELEVENLABS_API_KEY:-}" ] && set_env ELEVENLABS_API_KEY "$ELEVENLABS_API_KEY"
   ok "Clés enregistrées"
 else
   ok ".env existant conservé"
@@ -166,7 +166,7 @@ if ! grep -qE '^(GEMINI_API_KEY|GROQ_API_KEY|OPENAI_API_KEY)=.' "$APP/.env"; the
   if [ -n "${!key_var:-}" ]; then set_env "$key_var" "${!key_var}"; ok "IA : $provider"; fi
 fi
 grep -qE '^(GEMINI_API_KEY|GROQ_API_KEY|OPENAI_API_KEY)=.' "$APP/.env" \
-  || warn "Aucune clé d'IA pour écrire les histoires : relance le script pour l'ajouter (Gemini est gratuit)."
+  || warn "Aucune clé d'IA dans le .env : ajoute-la depuis Telegram (Réglages, Clés API ; Gemini est gratuit)."
 grep -q '^TIMEZONE=' "$APP/.env" || set_env TIMEZONE "Europe/Paris"
 # Clé de signature des liens (connexion des comptes, aperçus) indépendante du token Telegram
 grep -qE '^SECRET_KEY=.+' "$APP/.env" || set_env SECRET_KEY "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
