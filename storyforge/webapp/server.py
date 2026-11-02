@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import html
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from .. import db
@@ -24,18 +26,104 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "static"
+MAX_BODY = 64 * 1024  # aucune route n'accepte de gros envois
+
+# Politiques de sécurité du contenu : scripts uniquement servis par StoryForge (et Telegram pour la Mini App),
+# aucune donnée envoyée ailleurs, pages non intégrables dans un autre site (sauf la Mini App dans Telegram Web).
+_CSP_COMMON = ("default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+               "font-src https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; "
+               "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'")
+CSP_APP = f"{_CSP_COMMON}; script-src 'self' https://telegram.org; frame-ancestors https://web.telegram.org https://*.telegram.org"
+CSP_PAGE = f"{_CSP_COMMON}; script-src 'self'; frame-ancestors 'none'"
+CSP_DATA = "default-src 'none'; frame-ancestors 'none'"
+
+
+class FailureGuard:
+    """Bloque temporairement une adresse IP qui accumule les accès refusés (force brute, scans)."""
+
+    LIMIT = 30  # refus tolérés…
+    WINDOW = 600  # …sur 10 minutes
+    BAN = 1800  # puis blocage de 30 minutes
+
+    def __init__(self) -> None:
+        self._fails: dict[str, list[float]] = {}
+        self._banned: dict[str, float] = {}
+
+    def banned(self, ip: str) -> bool:
+        until = self._banned.get(ip)
+        if until is None:
+            return False
+        if until > time.monotonic():
+            return True
+        self._banned.pop(ip, None)
+        return False
+
+    def fail(self, ip: str) -> None:
+        now = time.monotonic()
+        hits = [t for t in self._fails.get(ip, ()) if now - t < self.WINDOW]
+        hits.append(now)
+        if len(hits) >= self.LIMIT:
+            self._fails.pop(ip, None)
+            self._banned[ip] = now + self.BAN
+            log.warning("Adresse %s bloquée 30 min : trop d'accès refusés", ip)
+            return
+        self._fails[ip] = hits
+        if len(self._fails) > 10000:  # borne la mémoire en cas d'attaque distribuée
+            self._fails.clear()
 
 
 def create_app(svc: Services) -> FastAPI:
     app = FastAPI(title="StoryForge", docs_url=None, redoc_url=None, openapi_url=None)
     settings = svc.settings
+    guard = FailureGuard()
+    app.state.failure_guard = guard
+    hsts = settings.public_base.startswith("https://")
+
+    @app.middleware("http")
+    async def security(request: Request, call_next):
+        ip = request.client.host if request.client else "?"
+        if guard.banned(ip):
+            response: Response = PlainTextResponse("Trop de tentatives refusées. Réessaie plus tard.", status_code=429)
+        else:
+            length = request.headers.get("content-length", "")
+            if length and (not length.isdigit() or int(length) > MAX_BODY):
+                response = PlainTextResponse("Requête refusée.", status_code=413)
+            else:
+                response = await call_next(request)
+            if response.status_code in (401, 403):
+                guard.fail(ip)
+        path = request.url.path
+        h = response.headers
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("Referrer-Policy", "no-referrer")
+        h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        if hsts:
+            h.setdefault("Strict-Transport-Security", "max-age=31536000")
+        if path == "/app":
+            h.setdefault("Content-Security-Policy", CSP_APP)
+        elif path.startswith(("/connect", "/oauth")):
+            h.setdefault("Content-Security-Policy", CSP_PAGE)
+            h.setdefault("X-Frame-Options", "DENY")
+        elif not path.startswith("/static/"):
+            h.setdefault("Content-Security-Policy", CSP_DATA)
+            h.setdefault("X-Frame-Options", "DENY")
+        return response
 
     def user(request: Request) -> dict:
-        init = request.headers.get("X-Telegram-Init-Data") or request.query_params.get("tma", "")
-        u = validate_init_data(init, settings.telegram_bot_token)
+        """Administrateur authentifié par la signature Telegram de la Mini App (en-tête uniquement)."""
+        u = validate_init_data(request.headers.get("X-Telegram-Init-Data", ""), settings.telegram_bot_token)
         if not u or int(u.get("id", 0)) not in settings.admin_ids:
             raise HTTPException(status_code=401, detail="Non autorisé")
         return u
+
+    def media_viewer(request: Request) -> int:
+        """Lecture des aperçus : jeton dédié, temporaire, qui ne permet aucune action."""
+        uid = svc.verify_media_session(request.query_params.get("mt", ""))
+        if uid is None:
+            raise HTTPException(status_code=401, detail="Non autorisé")
+        return uid
+
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     @app.get("/")
     async def root() -> RedirectResponse:
@@ -43,7 +131,7 @@ def create_app(svc: Services) -> FastAPI:
 
     @app.get("/healthz")
     async def health() -> dict:
-        return {"ok": True, "paused": await svc.is_paused()}
+        return {"ok": True}
 
     @app.get("/app")
     async def mini_app() -> FileResponse:
@@ -63,6 +151,7 @@ def create_app(svc: Services) -> FastAPI:
             for v in pending
         ]
         data["user"] = {"first_name": u.get("first_name", "")}
+        data["media_token"] = svc.media_session_token(int(u["id"]))
         return data
 
     @app.post("/api/system/pause")
@@ -132,7 +221,7 @@ def create_app(svc: Services) -> FastAPI:
         return {"ok": True}
 
     @app.get("/media/thumb/{vid}")
-    async def media_thumb(vid: int, u: dict = Depends(user)) -> FileResponse:
+    async def media_thumb(vid: int, viewer: int = Depends(media_viewer)) -> FileResponse:
         v = await svc.get_video(vid)
         if not v or not v.thumb_path or not Path(v.thumb_path).exists():
             raise HTTPException(404)
@@ -149,7 +238,7 @@ def create_app(svc: Services) -> FastAPI:
         return FileResponse(v.file_path, media_type="video/mp4")
 
     @app.get("/media/video/{vid}")
-    async def media_video(vid: int, u: dict = Depends(user)) -> FileResponse:
+    async def media_video(vid: int, viewer: int = Depends(media_viewer)) -> FileResponse:
         v = await svc.get_video(vid)
         path = v and (v.preview_path or v.file_path)
         if not path or not Path(path).exists():
@@ -193,12 +282,10 @@ def create_app(svc: Services) -> FastAPI:
         ch, exp = ctx
         flash = None
         q = request.query_params
-        if q.get("done"):
-            name = PLATFORM_LABELS.get(q["done"], q["done"])
-            flash = ("success", f"{name} est connecté.")
-        elif q.get("off"):
-            name = PLATFORM_LABELS.get(q["off"], q["off"])
-            flash = ("info", f"{name} est déconnecté.")
+        if q.get("done") in PLATFORM_LABELS:
+            flash = ("success", f"{PLATFORM_LABELS[q['done']]} est connecté.")
+        elif q.get("off") in PLATFORM_LABELS:
+            flash = ("info", f"{PLATFORM_LABELS[q['off']]} est déconnecté.")
         elif q.get("error"):
             flash = ("error", html.escape(q["error"][:300]))
         return pages.portal(
@@ -227,7 +314,12 @@ def create_app(svc: Services) -> FastAPI:
     async def connect_paste(token: str, platform: str, request: Request) -> Response:
         if not await portal_context(token):
             return pages.expired(tg_url())
-        form = parse_qs((await request.body()).decode("utf-8", "replace"))
+        body = b""
+        async for chunk in request.stream():
+            body += chunk
+            if len(body) > 16384:
+                raise HTTPException(413, "Requête trop volumineuse")
+        form = parse_qs(body.decode("utf-8", "replace"))
         try:
             res = await svc.complete_oauth_from_url((form.get("url") or [""])[0])
         except Exception as exc:
@@ -258,7 +350,7 @@ def create_app(svc: Services) -> FastAPI:
                                 message=f"{name} n'a pas donné l'accès : {html.escape(reason)}.",
                                 portal_url=portal_url(info.get("portal", "") if info else ""), telegram_url=tg_url())
         try:
-            res = await svc.complete_oauth(q.get("state", ""), q.get("code", ""))
+            res = await svc.complete_oauth(q.get("state", ""), q.get("code", ""), platform=platform)
         except Exception as exc:
             return pages.result(ok=False, heading="Connexion impossible", message=html.escape(str(exc)),
                                 telegram_url=tg_url())
@@ -289,6 +381,8 @@ def build_server(svc: Services):
 
     config = uvicorn.Config(
         create_app(svc), host=svc.settings.webapp_host, port=svc.settings.webapp_port,
-        log_level="warning", proxy_headers=True, forwarded_allow_ips="*",
+        log_level="warning", proxy_headers=True, server_header=False, limit_concurrency=100,
+        # Seul le proxy local (Caddy) peut indiquer l'adresse réelle du visiteur.
+        forwarded_allow_ips=svc.settings.webapp_trusted_proxies,
     )
     return _Server(config)

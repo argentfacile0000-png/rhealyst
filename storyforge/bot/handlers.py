@@ -18,6 +18,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
@@ -28,6 +29,7 @@ from ..dates import parse_when
 from ..version import auto_update_flag
 from ..video.background import VIDEO_EXTS
 from . import screens
+from .access import AccessGate
 from .fields import FIELD_MAP
 from .ui import PLATFORM, esc, kb
 
@@ -131,6 +133,8 @@ async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await guard(update, context):
+        return
     context.user_data.pop("await", None)
     await update.effective_message.reply_text("Saisie annulée.", reply_markup=kb([[("Ouvrir le dashboard", "h")]]))
 
@@ -781,7 +785,10 @@ async def on_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     svc = svc_of(context)
     dest_dir = svc.settings.backgrounds_dir / state["category"]
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / re.sub(r"[^\w.\- ]+", "_", name)
+    safe = re.sub(r"[^\w.\- ]+", "_", Path(name).name).lstrip(".") or f"video_{media.file_unique_id}.mp4"
+    dest = dest_dir / safe
+    if dest.exists():  # ne jamais écraser un fond existant
+        dest = dest_dir / f"{dest.stem}-{media.file_unique_id}{dest.suffix}"
     info = await msg.reply_text("Téléchargement…")
     tg_file = await media.get_file()
     await tg_file.download_to_drive(custom_path=dest)
@@ -809,7 +816,7 @@ async def _download_bg(context: ContextTypes.DEFAULT_TYPE, chat_id: int, url: st
         exe, "-f", "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/b",
         "--merge-output-format", "mp4", "--no-playlist", "--restrict-filenames",
         "-o", str(dest_dir / "%(title).60s-%(id)s.%(ext)s"), "--print", "after_move:filepath",
-        "--quiet", "--no-warnings", url,
+        "--quiet", "--no-warnings", "--", url,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     out, err = await proc.communicate()
@@ -834,6 +841,8 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def register(app: Application) -> None:
+    # Barrière globale (groupe -1) : rien ne passe sans être administrateur, en conversation privée.
+    app.add_handler(TypeHandler(Update, AccessGate()), group=-1)
     private = filters.ChatType.PRIVATE
     app.add_handler(CommandHandler(["start", "dashboard", "menu"], cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))

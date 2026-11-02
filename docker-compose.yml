@@ -8,4 +8,4 @@ services:
       - ./data:/app/data          # vidéos de fond, musique, rendus, base SQLite
       - ./secrets:/app/secrets    # google_client_secret.json
     ports:
-      - "8080:8080"               # Mini App (si WEBAPP_ENABLED=true)
+      - "127.0.0.1:8080:8080"     # Mini App (si WEBAPP_ENABLED=true), à exposer via un proxy HTTPS

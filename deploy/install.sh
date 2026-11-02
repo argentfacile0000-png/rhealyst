@@ -17,6 +17,7 @@ SERVICE="storyforge"
 UNIT="/etc/systemd/system/${SERVICE}.service"
 UPDATE_UNIT="/etc/systemd/system/${SERVICE}-update.service"
 UPDATE_TIMER="/etc/systemd/system/${SERVICE}-update.timer"
+HARDENING="/etc/systemd/system/${SERVICE}.service.d/10-hardening.conf"
 MARKER="# Managed by StoryForge install.sh"
 WITH_HTTPS=0
 for arg in "$@"; do
@@ -70,7 +71,7 @@ if [ -r /etc/os-release ]; then . /etc/os-release; ok "Système : ${PRETTY_NAME:
 if [ -d "$APP" ] && [ -n "$(ls -A "$APP" 2>/dev/null)" ] && [ ! -f "$APP/.storyforge" ]; then
   die "$APP existe déjà et n'appartient pas à StoryForge. Choisis un autre dossier : STORYFORGE_DIR=~/autre bash install.sh"
 fi
-for unit_file in "$UNIT" "$UPDATE_UNIT" "$UPDATE_TIMER"; do
+for unit_file in "$UNIT" "$UPDATE_UNIT" "$UPDATE_TIMER" "$HARDENING"; do
   if [ -f "$unit_file" ] && ! grep -q "$MARKER" "$unit_file"; then
     die "$unit_file existe déjà et n'a pas été créé par StoryForge : rien n'est modifié."
   fi
@@ -82,7 +83,7 @@ ok "Mémoire : ${mem_mb} Mo · disque libre : ${free_gb} Go"
 
 mkdir -p "$APP/data/backgrounds" "$APP/data/music" "$APP/data/state" "$APP/secrets" "$APP/bin"
 touch "$APP/.storyforge"
-chmod 700 "$APP/secrets"
+chmod 700 "$APP" "$APP/secrets" "$APP/data"
 
 # ---------------------------------------------------------------- 1. paquets système (ajout uniquement)
 step "Paquets système (ffmpeg)"
@@ -167,6 +168,8 @@ fi
 grep -qE '^(GEMINI_API_KEY|GROQ_API_KEY|OPENAI_API_KEY)=.' "$APP/.env" \
   || warn "Aucune clé d'IA pour écrire les histoires : relance le script pour l'ajouter (Gemini est gratuit)."
 grep -q '^TIMEZONE=' "$APP/.env" || set_env TIMEZONE "Europe/Paris"
+# Clé de signature des liens (connexion des comptes, aperçus) indépendante du token Telegram
+grep -qE '^SECRET_KEY=.+' "$APP/.env" || set_env SECRET_KEY "$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 set_env DATA_DIR "$APP/data"
 set_env FONTS_DIR "$APP/src/assets/fonts"
 grep -q '^GOOGLE_CLIENT_SECRETS_FILE=' "$APP/.env" || set_env GOOGLE_CLIENT_SECRETS_FILE "$APP/secrets/google_client_secret.json"
@@ -224,6 +227,9 @@ Nice=5
 [Install]
 WantedBy=multi-user.target
 EOF
+# Bac à sable du service (pas de root, système en lecture seule, noyau protégé)
+sudo mkdir -p "$(dirname "$HARDENING")"
+sudo install -m 644 "$APP/src/deploy/storyforge-hardening.conf" "$HARDENING"
 # Mise à jour automatique : vérifie GitHub toutes les 5 minutes
 install -m 755 "$APP/src/deploy/update.sh" "$APP/bin/update.sh"
 sudo tee "$UPDATE_UNIT" >/dev/null <<EOF

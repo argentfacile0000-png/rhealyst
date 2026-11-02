@@ -16,7 +16,11 @@ def _check(pairs: dict[str, str], bot_token: str, received_hash: str) -> bool:
     return hmac.compare_digest(computed, received_hash)
 
 
-def validate_init_data(init_data: str, bot_token: str, max_age: int = 86400) -> dict | None:
+# Durée de validité d'une session de Mini App : au-delà, il faut rouvrir le dashboard depuis le bot.
+INIT_DATA_MAX_AGE = 6 * 3600
+
+
+def validate_init_data(init_data: str, bot_token: str, max_age: int = INIT_DATA_MAX_AGE) -> dict | None:
     """Retourne l'utilisateur Telegram si la signature est valide, sinon None."""
     if not init_data or not bot_token:
         return None
@@ -30,7 +34,8 @@ def validate_init_data(init_data: str, bot_token: str, max_age: int = 86400) -> 
     if not ok:
         return None
     try:
-        if time.time() - int(pairs.get("auth_date", "0")) > max_age:
+        age = time.time() - int(pairs.get("auth_date", "0"))
+        if age > max_age or age < -300:
             return None
         return json.loads(pairs.get("user", "{}"))
     except (ValueError, json.JSONDecodeError):

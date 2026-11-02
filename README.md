@@ -274,6 +274,39 @@ Les vidéos sont déclarées comme contenant des médias synthétiques (`contain
 Avec la même configuration (`WEBAPP_ENABLED` et `PUBLIC_URL`), le bouton **Dashboard** apparaît dans le menu du bot.
 Les requêtes sont authentifiées par la signature Telegram (`initData`) et réservées aux admins.
 
+## Sécurité
+
+Seuls les identifiants listés dans `TELEGRAM_ADMIN_IDS` pilotent StoryForge.
+
+- **Bot Telegram.** Une barrière passe avant tout le reste : une personne qui n'est pas admin ne voit aucun écran,
+  ne peut appuyer sur aucun bouton (même d'un ancien message transféré) et ne déclenche aucune action. Le bot
+  quitte tout groupe ou canal où on l'ajoute : le dashboard ne fonctionne qu'en conversation privée. Chaque
+  tentative est bloquée et signalée dans Telegram (« Tentative d'accès bloquée », une fois par heure et par personne)
+  ainsi que dans le Journal.
+- **Mini App et API.** Chaque requête doit porter la signature Telegram d'un admin, valable 6 h (il suffit ensuite
+  de rouvrir le dashboard). La session ne circule jamais dans les adresses : les aperçus utilisent un jeton de
+  lecture séparé, temporaire, qui ne permet aucune action. Une adresse IP qui accumule les accès refusés est
+  bloquée 30 minutes.
+- **Pages web.** Politique de sécurité du contenu stricte (aucun script externe hors Telegram, aucun script inline,
+  aucune donnée envoyée ailleurs), pages non intégrables dans un autre site, HTTPS imposé (HSTS). Les liens de
+  connexion des comptes sont signés et expirent après 30 minutes ; chaque autorisation OAuth n'est utilisable
+  qu'une fois et pour la plateforme demandée.
+- **Serveur.** Le serveur web n'écoute que sur `127.0.0.1` (seul Caddy, en HTTPS, est exposé). `.env` et les
+  données ne sont lisibles que par ton utilisateur. Le service tourne dans un bac à sable systemd : pas de passage
+  root possible, système et noyau en lecture seule. Les liens signés utilisent une clé dédiée (`SECRET_KEY`,
+  générée à l'installation).
+
+**Le token du bot est la clé maîtresse.** Quiconque le connaît peut se faire passer pour le bot. S'il a circulé
+(capture d'écran, message, dépôt de code), régénère-le :
+
+1. Dans Telegram, @BotFather → `/revoke` → choisis le bot : il donne un nouveau token (l'ancien cesse de marcher).
+2. Sur le serveur : `nano ~/storyforge/.env`, remplace la valeur de `TELEGRAM_BOT_TOKEN`, puis
+   `sudo systemctl restart storyforge`.
+
+Même principe pour une clé ElevenLabs ou d'IA exposée : crée-en une nouvelle sur le site du fournisseur, supprime
+l'ancienne, puis remplace-la dans le `.env` (ou, pour ElevenLabs, ajoute-la dans Réglages → Clés ElevenLabs).
+Dans le pare-feu Lightsail, seuls les ports 22 (SSH), 80 et 443 (Caddy) doivent être ouverts.
+
 ---
 
 ## Utilisation

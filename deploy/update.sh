@@ -16,13 +16,68 @@ BRANCH="${STORYFORGE_BRANCH:-claude/telegram-dashboard-video-automation-92ebn6}"
 REPO="${STORYFORGE_REPO:-argentfacile0000-png/rhealyst}"
 SERVICE="storyforge"
 FORCE="${1:-}"
+MARKER="# Managed by StoryForge install.sh"
+SYSTEMD_DIR="${STORYFORGE_SYSTEMD_DIR:-/etc/systemd/system}"
+HARDENING="$SYSTEMD_DIR/${SERVICE}.service.d/10-hardening.conf"
+busy="$APP/data/state/busy"
 
 log() { echo "[storyforge-update] $*"; }
 as_user() { runuser -u "$APP_USER" -- "$@"; }
 
+# Vrai si un rendu ou une publication est en cours (fichier rafraîchi par l'application).
+is_busy() {
+  [ -f "$busy" ] && [ "$(( $(date +%s) - $(stat -c %Y "$busy") ))" -lt 2700 ]
+}
+
+# Réglages de sécurité gérés par StoryForge, appliqués aussi aux installations existantes.
+# Ne touche qu'aux fichiers de StoryForge ; renvoie 0 si quelque chose a changé (redémarrage nécessaire).
+sync_security() {
+  local changed=1 env="$APP/.env"
+  chmod 700 "$APP" "$APP/data" "$APP/secrets" 2>/dev/null || true
+  [ -f "$env" ] && chmod 600 "$env"
+  # Clé de signature des liens indépendante du token Telegram
+  if [ -f "$env" ] && ! grep -qE '^SECRET_KEY=.+' "$env"; then
+    local key
+    key="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    as_user sed -i '/^SECRET_KEY=/d' "$env"
+    printf 'SECRET_KEY=%s\n' "$key" | as_user tee -a "$env" >/dev/null
+    log "Clé de signature dédiée ajoutée au .env"
+    changed=0
+  fi
+  # Bac à sable systemd du service (seulement si le service a été installé par StoryForge)
+  local src="$APP/src/deploy/storyforge-hardening.conf"
+  if [ -f "$src" ] && grep -q "$MARKER" "$SYSTEMD_DIR/${SERVICE}.service" 2>/dev/null; then
+    if [ -f "$HARDENING" ] && ! grep -q "$MARKER" "$HARDENING"; then
+      log "$HARDENING n'a pas été créé par StoryForge : laissé tel quel"
+    elif [ ! -f "$HARDENING" ] && [ -f "$HARDENING.disabled" ] && cmp -s "$src" "$HARDENING.disabled"; then
+      :  # cette version du bac à sable a déjà empêché le démarrage : on ne la réessaie pas
+    elif ! cmp -s "$src" "$HARDENING"; then
+      mkdir -p "$(dirname "$HARDENING")"
+      install -m 644 "$src" "$HARDENING"
+      systemctl daemon-reload
+      log "Bac à sable du service mis à jour"
+      changed=0
+    fi
+  fi
+  return "$changed"
+}
+
 if [ "$FORCE" != "--force" ]; then
   if grep -qiE '^AUTO_UPDATE=(false|0|no|non)\s*$' "$APP/.env" 2>/dev/null || [ -f "$APP/data/state/auto_update_disabled" ]; then
     exit 0
+  fi
+fi
+
+if ! is_busy && sync_security; then
+  systemctl restart "$SERVICE"
+  sleep 10
+  if ! systemctl is-active --quiet "$SERVICE" && [ -f "$HARDENING" ]; then
+    # Filet de sécurité : si le bac à sable empêche le démarrage, on le retire et on prévient dans le journal.
+    log "Le service ne démarre pas avec le bac à sable : retrait de $HARDENING"
+    journalctl -u "$SERVICE" -n 20 --no-pager || true
+    mv "$HARDENING" "$HARDENING.disabled"
+    systemctl daemon-reload
+    systemctl restart "$SERVICE"
   fi
 fi
 
@@ -40,13 +95,9 @@ if [ "$FORCE" != "--force" ] && [ "$(cat "$APP/data/state/failed_version" 2>/dev
 fi
 
 # Ne pas couper un rendu ou une publication en cours (le fichier est rafraîchi par l'application).
-busy="$APP/data/state/busy"
-if [ -f "$busy" ] && [ "$FORCE" != "--force" ]; then
-  age=$(( $(date +%s) - $(stat -c %Y "$busy") ))
-  if [ "$age" -lt 2700 ]; then
-    log "Nouvelle version ${latest:0:7} disponible, report : tâche en cours"
-    exit 0
-  fi
+if [ "$FORCE" != "--force" ] && is_busy; then
+  log "Nouvelle version ${latest:0:7} disponible, report : tâche en cours"
+  exit 0
 fi
 
 log "Mise à jour ${current:0:7} → ${latest:0:7}"

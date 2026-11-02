@@ -95,12 +95,16 @@ class Settings(BaseSettings):
 
     # --- Mini App Telegram / serveur web ------------------------------------
     webapp_enabled: bool = False
-    webapp_host: str = "0.0.0.0"
+    # 127.0.0.1 : joignable seulement via le proxy HTTPS local (Caddy). Docker : 0.0.0.0 (voir Dockerfile).
+    webapp_host: str = "127.0.0.1"
     webapp_port: int = 8080
+    # Proxys autorisés à transmettre l'adresse IP réelle des visiteurs (X-Forwarded-For)
+    webapp_trusted_proxies: str = "127.0.0.1"
     # URL publique HTTPS (ex: https://studio.mondomaine.com) — requise pour la Mini App
     # et la page de connexion des comptes YouTube / TikTok.
     public_url: str = ""
-    # Clé de signature des liens de connexion (par défaut dérivée du token Telegram).
+    # Clé de signature des liens de connexion et des aperçus (générée par install.sh ;
+    # à défaut, dérivée du token Telegram).
     secret_key: str = ""
 
     # ------------------------------------------------------------------------

@@ -96,7 +96,7 @@ async def test_generate_render_and_publish(svc, monkeypatch):
     headers = {"X-Telegram-Init-Data": _init_data(svc.settings.telegram_bot_token, 42)}
     r = client.get("/api/overview", headers=headers)
     assert r.status_code == 200 and r.json()["approvals"][0]["id"] == ids[1]
-    assert client.get(f"/media/thumb/{ids[0]}", params={"tma": headers["X-Telegram-Init-Data"]}).status_code == 200
+    assert client.get(f"/media/thumb/{ids[0]}", params={"mt": r.json()["media_token"]}).status_code == 200
     assert client.post(f"/api/videos/{ids[1]}/discard", headers=headers).json() == {"ok": True}
     assert (await svc.get_video(ids[1])).status == VideoStatus.DISCARDED
     other = {"X-Telegram-Init-Data": _init_data(svc.settings.telegram_bot_token, 7)}

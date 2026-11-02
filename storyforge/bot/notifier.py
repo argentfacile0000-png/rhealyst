@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
+import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from telegram import Bot
+from telegram import Bot, LinkPreviewOptions
 from telegram.constants import ParseMode
 from telegram.error import BadRequest, RetryAfter, TelegramError
 
@@ -119,10 +121,16 @@ class TelegramNotifier:
 
     async def notify(self, text: str, level: str = "info", channel_id: int | None = None) -> None:
         for chat in self.admins:
+            kwargs = {"disable_notification": level == "info", "reply_markup": kb([[("Ouvrir le dashboard", "h")]])}
             try:
-                await self.bot.send_message(chat, text, parse_mode=ParseMode.HTML,
-                                            disable_notification=level == "info",
-                                            reply_markup=kb([[("Ouvrir le dashboard", "h")]]))
+                await self.bot.send_message(chat, text, parse_mode=ParseMode.HTML, **kwargs)
+            except BadRequest as exc:
+                # Texte HTML refusé (caractère spécial dans un message d'erreur…) : l'alerte part quand même, en clair.
+                log.warning("Notification HTML refusée (%s), envoi en texte brut", exc)
+                try:
+                    await self.bot.send_message(chat, html.unescape(re.sub(r"<[^>]+>", "", text))[:4000], **kwargs)
+                except TelegramError as exc2:
+                    log.warning("Notification impossible (%s): %s", chat, exc2)
             except TelegramError as exc:
                 log.warning("Notification impossible (%s): %s", chat, exc)
 
@@ -216,7 +224,7 @@ class TelegramNotifier:
         for chat in self.admins:
             try:
                 await self.bot.send_message(chat, "\n".join(lines), parse_mode=ParseMode.HTML,
-                                            reply_markup=kb(rows), disable_web_page_preview=True,
+                                            reply_markup=kb(rows), link_preview_options=LinkPreviewOptions(is_disabled=True),
                                             disable_notification=bool(ok))
             except TelegramError as exc:
                 log.warning("Notification publication impossible: %s", exc)

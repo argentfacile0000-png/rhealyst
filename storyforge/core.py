@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import hmac
 import logging
 import secrets
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 
 PAUSE_KEY = "system_paused"
 PORTAL_TTL = 1800  # validité d'un lien de connexion des comptes (s)
+MEDIA_SESSION_TTL = 2 * 3600  # validité du jeton de lecture des aperçus de la Mini App (s)
 
 
 class OAuthResult(NamedTuple):
@@ -148,7 +150,7 @@ class Services:
                     ch = await self.get_channel(channel_id)
                     what = "Vidéo longue automatique échouée" if kind == VideoFormat.HORIZONTAL else "Génération automatique échouée"
                     await self.notifier.notify(
-                        f"<b>{what}</b> · {ch.name if ch else channel_id}\n\n{str(exc)[:300]}\n"
+                        f"<b>{what}</b> · {html.escape(ch.name) if ch else channel_id}\n\n{html.escape(str(exc)[:300])}\n"
                         f"<i>Nouvel essai automatique dans {delay // 60} min.</i>",
                         "error", channel_id,
                     )
@@ -197,7 +199,7 @@ class Services:
                                    "warning", ch.id)
             return
         await self.notifier.notify(
-            f"<b>Créneau manqué</b> · {ch.name}\n\nAucune {label} validée pour ce créneau.\n"
+            f"<b>Créneau manqué</b> · {html.escape(ch.name)}\n\nAucune {label} validée pour ce créneau.\n"
             "<i>Valide une vidéo en attente ou lance une génération.</i>",
             "warning", ch.id,
         )
@@ -504,6 +506,29 @@ class Services:
     def verify_media(self, video_id: int, exp: int, sig: str) -> bool:
         return exp >= time.time() and hmac.compare_digest(sig, self._media_sig(video_id, exp))
 
+    # Jeton de lecture des aperçus pour la Mini App : n'autorise que l'affichage des vidéos et miniatures,
+    # jamais une action. Évite de faire circuler la session Telegram dans les adresses des médias.
+    def _session_sig(self, payload: str) -> str:
+        return hmac.new(self._portal_key(), f"mediasession:{payload}".encode(), hashlib.sha256).hexdigest()[:32]
+
+    def media_session_token(self, user_id: int, ttl: int = MEDIA_SESSION_TTL) -> str:
+        # Expiration arrondie à l'heure : le jeton (et donc l'adresse des miniatures) reste stable entre
+        # deux rafraîchissements, le navigateur garde les images en cache.
+        exp = (int(time.time()) + ttl) // 3600 * 3600 + 3600
+        payload = f"{int(user_id)}.{exp}"
+        return f"{payload}.{self._session_sig(payload)}"
+
+    def verify_media_session(self, token: str) -> int | None:
+        """Identifiant de l'administrateur si le jeton est authentique et valable, sinon None."""
+        try:
+            uid, exp, sig = token.split(".")
+            if not hmac.compare_digest(sig, self._session_sig(f"{uid}.{exp}")) or int(exp) < time.time():
+                return None
+            user_id = int(uid)
+        except ValueError:
+            return None
+        return user_id if user_id in self.settings.admin_ids else None
+
     def platform_problem(self, platform: str, channel_id: int) -> str | None:
         """Message expliquant ce qui manque pour connecter cette plateforme, ou None."""
         s = self.settings
@@ -548,10 +573,14 @@ class Services:
             return self.instagram_auth_url(channel_id, portal=portal)
         return self.tiktok_auth_url(channel_id, portal=portal)
 
-    async def complete_oauth(self, state: str, code: str) -> OAuthResult:
-        info = self.oauth.pop(state)
+    async def complete_oauth(self, state: str, code: str, platform: str | None = None) -> OAuthResult:
+        info = self.oauth.pop(state) if state else None
         if not info:
             raise PublisherError("Lien d'autorisation expiré ou inconnu : relance la connexion")
+        if platform and info["platform"] != platform:
+            raise PublisherError("Cette réponse ne correspond pas à la plateforme demandée : relance la connexion")
+        if not code:
+            raise PublisherError("Réponse d'autorisation incomplète (code manquant) : relance la connexion")
         platform, channel_id = info["platform"], info["channel_id"]
         s = self.settings
         if platform == "youtube":

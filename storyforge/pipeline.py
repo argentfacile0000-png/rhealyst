@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import random
 import re
@@ -316,7 +317,7 @@ class Pipeline:
 
     async def _tts_event(self, text: str) -> None:
         await db.log_event(text, "warning")
-        await self.notifier.notify(f"<b>ElevenLabs</b>\n\n{text}", "warning")
+        await self.notifier.notify(f"<b>ElevenLabs</b>\n\n{html.escape(text)}", "warning")
 
     async def _get_video(self, video_id: int) -> Video | None:
         async with db.session() as s:
@@ -403,7 +404,7 @@ class Pipeline:
             platforms = ch.platforms(video.format)
             if not platforms:
                 await self.notifier.notify(
-                    f"<b>Publication en attente</b> · {ch.name}\n\nAucune plateforme liée ou activée. "
+                    f"<b>Publication en attente</b> · {html.escape(ch.name)}\n\nAucune plateforme liée ou activée. "
                     f"La vidéo #{video_id} reste en stock.",
                     "warning", ch.id,
                 )
