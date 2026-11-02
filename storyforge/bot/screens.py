@@ -783,16 +783,22 @@ async def platform_guide(svc: Services, platform: str) -> Screen:
         ]
         rows = [[("Envoyer le fichier JSON", "pfg")]]
     elif platform == "tiktok":
+        direct = svc.apps.tiktok_direct
         lines = [
-            title("TikTok", "TikTok for Developers"), "", f"État  {state}", "",
+            title("TikTok", "TikTok for Developers"), "", f"État  {state}",
+            "Publication  " + ("<b>directe</b> (video.publish)" if direct
+                               else "<b>en brouillon</b> : tu finalises dans l'app TikTok"), "",
             "1. Ouvre TikTok for Developers, connecte-toi, puis <b>Manage apps</b>, <b>Connect an app</b>.",
             "2. Renseigne l'app (plateforme <b>Web</b>) :",
             f"    Web/Desktop URL : {_code(base)}",
             f"    Terms of Service URL : {_code(base + '/legal/terms')}",
             f"    Privacy Policy URL : {_code(base + '/legal/privacy')}",
-            "3. Ajoute <b>Login Kit</b> et <b>Content Posting API</b> (active <i>Direct Post</i>). Redirect URI :",
+            "3. Ajoute <b>Login Kit</b> et <b>Content Posting API</b>"
+            + (" (active <i>Direct Post</i>)." if direct else " (sans <i>Direct Post</i>).") + " Redirect URI :",
             f"    {_code(base + '/oauth/tiktok')}",
-            "    Scopes : <code>user.info.basic</code>, <code>video.upload</code>, <code>video.publish</code>",
+            "    Scopes : <code>user.info.basic</code>, <code>video.upload</code>"
+            + (", <code>video.publish</code>" if direct else "") + ". Retire tous les autres "
+            "(<i>user.info.profile, user.info.stats, video.list, minis…</i>) : un scope inutile bloque la revue.",
             "4. Copie le <b>Client key</b> et le <b>Client secret</b>, puis appuie sur <b>Saisir les clés</b>.",
             "5. Envoie l'app en revue (<i>Submit for review</i>).",
             "",
@@ -802,10 +808,12 @@ async def platform_guide(svc: Services, platform: str) -> Screen:
             "<b>Fichier de vérification</b> et envoie-le ici. Clique ensuite <i>Verify</i> dans TikTok.",
             *([muted("Publiés : " + ", ".join(f"/{n}" for n in published))] if published else []),
             "",
-            muted("Tant que TikTok n'a pas audité l'app, les vidéos ne peuvent être publiées qu'en privé (Moi seul). "
-                  "En attendant, règle le mode TikTok de la chaîne sur Brouillon : tu finalises dans l'app."),
+            muted("Les brouillons sont le plus simple à faire valider : la vidéo arrive dans ta boîte de réception "
+                  "TikTok et tu la publies en un tap. La publication directe exige en plus l'audit de TikTok ; "
+                  "sans lui, les vidéos restent privées (Moi seul)."),
         ]
-        rows = [[("Saisir les clés", "pfk:tiktok"), ("Fichier de vérification", "pfv")]]
+        rows = [[("Saisir les clés", "pfk:tiktok"), ("Fichier de vérification", "pfv")],
+                [("Passer en brouillons" if direct else "Passer en publication directe", "pftd")]]
         if published:
             rows.append([("Retirer les fichiers de vérification", "pfvx")])
     else:

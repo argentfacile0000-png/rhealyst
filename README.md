@@ -258,7 +258,8 @@ Les vidéos sont déclarées comme contenant des médias synthétiques (`contain
 ### TikTok
 
 1. [developers.tiktok.com](https://developers.tiktok.com/) : crée une app, ajoute **Login Kit** et **Content Posting API**
-   (scopes `user.info.basic`, `video.upload`, `video.publish`).
+   (scopes `user.info.basic` et `video.upload` ; `video.publish` seulement pour la publication directe).
+   Retire tout autre scope : un scope inutile bloque la revue de TikTok.
 2. Déclare la **Redirect URI** `https://studio.mondomaine.com/oauth/tiktok`.
    Saisis le Client key et le Client secret dans le bot (Réglages → Plateformes → TikTok, ils sont vérifiés
    auprès de TikTok), ou dans le `.env` (`TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`).

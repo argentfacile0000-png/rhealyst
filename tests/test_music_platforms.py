@@ -302,3 +302,24 @@ async def test_tiktok_site_verification_file(public):
     assert client.get("/storyforge.db").status_code == 404 and client.get("/..%2F.env").status_code == 404
     await click(ctx, "pfvx")
     assert client.get("/tiktokZz9yXw8vU7tS6rQ5.txt").status_code == 404
+
+
+async def test_tiktok_scopes_follow_the_app_mode(public):
+    from urllib.parse import parse_qs, urlparse
+
+    svc = public
+    svc.settings.tiktok_client_key, svc.settings.tiktok_client_secret = "ck12345678", "cs"
+    ch = await svc.create_channel("Scopes")
+    scope = lambda: parse_qs(urlparse(svc.auth_url("tiktok", ch.id)).query)["scope"][0]  # noqa: E731
+    assert scope() == "user.info.basic,video.upload"  # brouillons par défaut
+    ctx, _ = make_ctx(svc)
+    q = await click(ctx, "pftd")
+    assert "video.publish" in scope() and "Direct Post" in q.edits[-1]
+    await PlatformApps(svc.settings).load()
+    await click(ctx, "pftd")
+    assert scope() == "user.info.basic,video.upload"
+
+    # Compte autorisé sans video.publish : la publication part en brouillon
+    assert tiktok.effective_mode({"scope": "user.info.basic,video.upload"}, "direct") == "draft"
+    assert tiktok.effective_mode({"scope": "user.info.basic,video.publish,video.upload"}, "direct") == "direct"
+    assert tiktok.effective_mode({}, "direct") == "direct"  # ancien jeton sans information

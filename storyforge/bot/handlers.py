@@ -560,7 +560,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
         await q.answer()
         await _ask_bg(update, context, cats[idx])
-    elif head in ("pfy", "pft", "pfi", "pfg", "pfk", "pfx", "pfv", "pfvx"):
+    elif head in ("pfy", "pft", "pfi", "pfg", "pfk", "pfx", "pfv", "pfvx", "pftd"):
         await platform_action(update, context, head, parts)
     elif head in ("mua", "mut", "mup", "mud", "muD", "mue"):
         await music_action(update, context, head, parts)
@@ -898,6 +898,11 @@ async def platform_action(update: Update, context: ContextTypes.DEFAULT_TYPE, he
         await prompt(update, context, "<b>Vérification du site TikTok</b>\n\nEnvoie le fichier de vérification "
                      "téléchargé depuis TikTok (<i>tiktok….txt</i>), ou colle la ligne "
                      "<code>tiktok-developers-site-verification=…</code>.", {"kind": "site_verify"})
+    elif head == "pftd":
+        direct = not svc.apps.tiktok_direct
+        await svc.apps.set_tiktok_direct(direct)
+        await q.answer("Publication directe : reconnecte les comptes TikTok" if direct else "Envoi en brouillon")
+        await show(update, context, await screens.platform_guide(svc, "tiktok"))
     elif head == "pfvx":
         from ..platform_apps import clear_verifications
 

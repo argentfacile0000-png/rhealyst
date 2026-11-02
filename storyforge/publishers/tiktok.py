@@ -25,19 +25,22 @@ log = logging.getLogger(__name__)
 
 AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 API = "https://open.tiktokapis.com"
-SCOPES = "user.info.basic,video.publish,video.upload"
+# Brouillons : l'app n'a besoin que de Login Kit + « Upload » (le plus simple à faire valider par TikTok).
+SCOPES_DRAFT = "user.info.basic,video.upload"
+# Publication directe : ajoute video.publish (option « Direct Post » de la Content Posting API).
+SCOPES_DIRECT = "user.info.basic,video.publish,video.upload"
 
 MIN_CHUNK = 5 * 1024 * 1024
 MAX_SINGLE = 64 * 1024 * 1024
 CHUNK = 10 * 1024 * 1024
 
 
-def build_auth_url(client_key: str, redirect_uri: str, state: str) -> str:
+def build_auth_url(client_key: str, redirect_uri: str, state: str, *, direct: bool = False) -> str:
     if not client_key or not redirect_uri:
-        raise PublisherError("TIKTOK_CLIENT_KEY / TIKTOK_REDIRECT_URI manquants dans le .env")
+        raise PublisherError("App TikTok non configurée (Réglages, Plateformes, TikTok)")
     params = {
         "client_key": client_key,
-        "scope": SCOPES,
+        "scope": SCOPES_DIRECT if direct else SCOPES_DRAFT,
         "response_type": "code",
         "redirect_uri": redirect_uri,
         "state": state,
@@ -155,7 +158,16 @@ def chunk_plan(size: int) -> tuple[int, int]:
     return CHUNK, count
 
 
+def effective_mode(creds: dict, mode: str) -> str:
+    """Brouillon si le compte n'a pas autorisé la publication directe (scope video.publish absent)."""
+    granted = {s.strip() for s in str(creds.get("scope") or "").split(",") if s.strip()}
+    if mode != "draft" and granted and "video.publish" not in granted:
+        return "draft"
+    return mode
+
+
 async def publish(creds: dict, req: PublishRequest, *, username: str = "") -> PublishResult:
+    req.mode = effective_mode(creds, req.mode)
     token = creds.get("access_token")
     if not token:
         raise PublisherError("Compte TikTok non lié")

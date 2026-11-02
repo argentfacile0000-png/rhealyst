@@ -63,11 +63,18 @@ class PlatformApps:
         self.settings = settings
         self._env = {k: getattr(settings, k) for keys in KEYS.values() for k in keys}
         self._stored: dict[str, str] = {}
+        self.tiktok_direct = False  # demander video.publish (publication directe) en plus des brouillons
 
     async def load(self) -> None:
         self._stored = {k: v for k, v in (await db.kv_get(KV_KEY, {}) or {}).items() if k in self._env and v}
         for k, v in self._stored.items():
             setattr(self.settings, k, v)
+        self.tiktok_direct = bool(await db.kv_get("tiktok_direct_post", False))
+
+    async def set_tiktok_direct(self, enabled: bool) -> None:
+        self.tiktok_direct = enabled
+        await db.kv_set("tiktok_direct_post", enabled)
+        await db.log_event(f"TikTok : {'publication directe' if enabled else 'envoi en brouillon'} demandé aux comptes")
 
     def source(self, platform: str) -> str | None:
         """« bot », « .env » ou None selon l'origine des identifiants de la plateforme."""

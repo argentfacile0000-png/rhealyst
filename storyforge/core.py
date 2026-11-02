@@ -562,7 +562,7 @@ class Services:
     def tiktok_auth_url(self, channel_id: int, portal: str = "") -> str:
         redirect = self.tiktok_redirect_uri()
         state = self.oauth.new("tiktok", channel_id, redirect=redirect, portal=portal)
-        return tiktok.build_auth_url(self.settings.tiktok_client_key, redirect, state)
+        return tiktok.build_auth_url(self.settings.tiktok_client_key, redirect, state, direct=self.apps.tiktok_direct)
 
     def instagram_auth_url(self, channel_id: int, portal: str = "") -> str:
         redirect = self.instagram_redirect_uri()
