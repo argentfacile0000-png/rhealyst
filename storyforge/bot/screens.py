@@ -712,8 +712,8 @@ async def settings_screen(svc: Services) -> Screen:
         lines.append(row("Version", version["short"]) + "  " + muted("mises à jour auto" if auto else "mises à jour suspendues"))
     rows = [
         [("Clés API", "ak"), ("Plateformes", "pf")],
-        [("Réglages YouTube", "yt"), ("Journal", "ev")],
-        [("État du système", "stt")],
+        [("Prompt des histoires", "sp0"), ("Réglages YouTube", "yt")],
+        [("Journal", "ev"), ("État du système", "stt")],
     ]
     if version:
         rows.append([("Suspendre les mises à jour auto" if auto else "Réactiver les mises à jour auto", "sau")])
@@ -771,6 +771,30 @@ async def api_keys(svc: Services) -> Screen:
     if any(k.source == "env" for k in keys + ekeys) or svc.pipeline.llm_keys.env_keys() or (el and el.env_keys()):
         lines += ["", muted("Les clés du .env sont reprises ici automatiquement ; pour en retirer une définitivement, "
                             "efface-la aussi du .env du serveur.")]
+    rows.append([("← Réglages", "set"), (HOME, "h")])
+    return "\n".join(lines), kb(rows)
+
+
+def story_prompt(svc: Services) -> Screen:
+    from ..story.prompts import SYSTEM_PROMPT
+
+    custom = svc.pipeline.stories.system_prompt
+    text = custom or SYSTEM_PROMPT
+    lines = [
+        title("Prompt des histoires"),
+        muted("Le prompt système envoyé à l'IA avant chaque histoire : style, ton, règles d'écriture, format de "
+              "réponse. La demande propre à chaque vidéo (format, durée, langue, consignes de la chaîne) s'y ajoute."),
+        "",
+        row("Version", "personnalisée" if custom else "originale") + "  " + muted(f"{len(text)} caractères"),
+        "",
+        f"<blockquote expandable>{esc(text[:3000])}{'…' if len(text) > 3000 else ''}</blockquote>",
+        "",
+        muted("Pour le modifier : « Recevoir le texte », copie-le, retouche-le puis renvoie-le avec « Modifier ». "
+              "Garde la consigne de réponse en JSON, sinon les histoires ne pourront pas être lues."),
+    ]
+    rows = [[("Recevoir le texte", "spf"), ("Modifier", "spe")]]
+    if custom:
+        rows.append([("Rétablir l'original", "spr")])
     rows.append([("← Réglages", "set"), (HOME, "h")])
     return "\n".join(lines), kb(rows)
 

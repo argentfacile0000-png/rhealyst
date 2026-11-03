@@ -277,3 +277,70 @@ async def test_custom_split_duration(svc):
     assert (await svc.get_channel(ch.id)).split_seconds == 0
     await svc.update_channel(ch.id, min_seconds=900, max_seconds=1200)
     assert (await svc.get_channel(ch.id)).max_seconds == 1200
+
+
+async def test_story_system_prompt_from_settings(svc, monkeypatch):
+    from types import SimpleNamespace
+
+    from storyforge.story.prompts import SYSTEM_PROMPT
+
+    ctx, bot = make_ctx(svc)
+    docs = []
+
+    async def send_document(chat_id, document=None, filename="", **kw):
+        docs.append((filename, document.read().decode()))
+
+    monkeypatch.setattr(bot, "send_document", send_document, raising=False)
+    q = await click(ctx, "set")
+    q = await click(ctx, "sp0")
+    assert "Prompt des histoires" in q.edits[-1] and "originale" in q.edits[-1]
+    await click(ctx, "spf")
+    assert docs and docs[0][0] == "prompt-histoires.txt" and docs[0][1] == SYSTEM_PROMPT
+
+    await click(ctx, "spe")
+    m = await type_text(ctx, "trop court")
+    assert "trop court" in m.replies[-1].lower()
+    custom = "Tu écris des histoires d'horreur courtes et glaçantes. " * 3 + "Réponds en JSON."
+    await type_text(ctx, custom)
+    assert svc.pipeline.stories.system_prompt == custom.strip()
+    q = await click(ctx, "sp0")
+    assert "personnalisée" in q.edits[-1]
+
+    # Le prompt personnalisé est bien envoyé à l'IA, et survit à un redémarrage
+    sent = []
+    real = svc.pipeline.stories._client.chat.completions.create
+
+    async def spy(**kw):
+        sent.append(kw["messages"][0]["content"])
+        return await real(**kw)
+
+    svc.pipeline.stories._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=spy)))
+    svc.pipeline.stories._client.chat.completions.create = spy
+    await svc.pipeline.stories.generate(language="fr", seconds_per_part=6)
+    assert sent[0] == custom.strip()
+    from storyforge import db
+
+    assert await db.kv_get("story_system_prompt") == custom.strip()
+
+    # Fichier .txt, puis retour à l'original
+    await click(ctx, "spe")
+
+    class TgFile:
+        async def download_as_bytearray(self):
+            return bytearray(("Version fichier. " * 10 + "JSON").encode())
+
+    async def get_file():
+        return TgFile()
+
+    from storyforge.bot import handlers
+
+    from .test_bot import FakeMessage
+
+    msg = FakeMessage("")
+    msg.document = SimpleNamespace(file_name="p.txt", file_size=200, get_file=get_file)
+    upd = SimpleNamespace(callback_query=None, effective_user=SimpleNamespace(id=42),
+                          effective_chat=SimpleNamespace(id=42), effective_message=msg)
+    await handlers.on_file(upd, ctx)
+    assert svc.pipeline.stories.system_prompt.startswith("Version fichier.")
+    await click(ctx, "spr")
+    assert svc.pipeline.stories.system_prompt is None

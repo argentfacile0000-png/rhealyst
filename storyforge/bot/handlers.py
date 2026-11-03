@@ -456,6 +456,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await video_extra_action(update, context, head, parts)
     elif head in ("aka", "akd", "aku", "akr", "akm", "akmp", "akms", "akmo", "akg", "akgs", "akgo"):
         await api_key_action(update, context, head, parts)
+    elif head in ("sp0", "spf", "spe", "spr"):
+        await story_prompt_action(update, context, head)
     elif head in ("vm", "vml"):
         v = await svc.get_video(cid)
         await q.answer()
@@ -695,6 +697,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await show(update, context, await screens.ytdlp_settings(svc), new=True)
         elif kind == "ytdlp_cookies":
             raise ValueError("Envoie le fichier cookies.txt lui-même (trombone, Fichier)")
+        elif kind == "story_prompt":
+            await save_story_prompt(update, context, update.effective_message.text or "")
         elif kind == "api_key_model":
             if not re.fullmatch(r"[\w.:/\-@]{2,160}", text):
                 raise ValueError("Identifiant de modèle invalide")
@@ -736,6 +740,17 @@ async def on_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if state.get("kind") == "google_json":
         await receive_google_client(update, context)
+        return
+    if state.get("kind") == "story_prompt":
+        doc = msg.document
+        if doc is None or (doc.file_size or 0) > 100_000:
+            await msg.reply_html("Envoie le prompt en texte, ou un fichier .txt (100 Ko maximum).")
+            return
+        raw = bytes(await (await doc.get_file()).download_as_bytearray())
+        try:
+            await save_story_prompt(update, context, raw.decode("utf-8-sig", "replace"))
+        except ValueError as exc:
+            await msg.reply_html(f"{esc(exc)}\n<i>Réessaie, ou /cancel pour annuler.</i>")
         return
     if state.get("kind") == "ytdlp_proxies":
         doc = msg.document
@@ -1233,6 +1248,53 @@ async def receive_app_key(update: Update, context: ContextTypes.DEFAULT_TYPE, st
                                    f"✓ App {PLATFORM[platform]} enregistrée. Connecte maintenant ton compte : "
                                    f"Chaîne, puis Comptes.{note}", parse_mode=ParseMode.HTML)
     await show(update, context, await screens.platform_guide(svc, platform), new=True)
+
+
+async def story_prompt_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str) -> None:
+    import io
+
+    from ..story.prompts import SYSTEM_PROMPT
+
+    svc = svc_of(context)
+    q = update.callback_query
+    chat = update.effective_chat.id
+    text = svc.pipeline.stories.system_prompt or SYSTEM_PROMPT
+    if head == "spf":
+        await q.answer()
+        if len(text) <= 4000:  # à copier directement depuis Telegram
+            await context.bot.send_message(chat, text)
+        await context.bot.send_document(chat, document=io.BytesIO(text.encode("utf-8")),
+                                        filename="prompt-histoires.txt", caption="Prompt système des histoires")
+        return
+    if head == "spe":
+        await q.answer()
+        await prompt(update, context, "<b>Modifier le prompt des histoires</b>\n\nEnvoie le nouveau prompt système en "
+                     "texte, ou un fichier .txt s'il dépasse la taille d'un message.\n\n<i>Il remplace le prompt "
+                     "actuel pour toutes les chaînes. « Rétablir l'original » reste disponible.</i>",
+                     {"kind": "story_prompt"})
+        return
+    if head == "spr":
+        await svc.set_story_prompt(None)
+        await q.answer("Prompt original rétabli")
+    else:
+        await q.answer()
+    await show(update, context, screens.story_prompt(svc))
+
+
+async def save_story_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    svc = svc_of(context)
+    text = text.strip()
+    if len(text) < 50:
+        raise ValueError("Prompt trop court : envoie le prompt complet (50 caractères minimum)")
+    if len(text) > 30000:
+        raise ValueError("Prompt trop long (30 000 caractères maximum)")
+    await svc.set_story_prompt(text)
+    context.user_data.pop("await", None)
+    warn = "" if "json" in text.lower() else ("\n\n! Le prompt ne mentionne plus le JSON : l'IA doit répondre en JSON "
+                                               "(title, parts, hashtags…), sinon la génération échouera.")
+    await context.bot.send_message(update.effective_chat.id,
+                                   f"✓ Prompt des histoires enregistré ({len(text)} caractères).{warn}")
+    await show(update, context, screens.story_prompt(svc), new=True)
 
 
 async def receive_google_client(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

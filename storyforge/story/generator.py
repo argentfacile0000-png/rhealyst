@@ -137,6 +137,7 @@ class StoryGenerator:
         self._client = client  # client imposé (tests) : pas de trousseau
         self.keys = keys  # LLMKeyRing
         self.on_event = None  # async (texte) : bascule de clé, pour prévenir l'admin
+        self.system_prompt: str | None = None  # prompt système personnalisé (dashboard) ; None = original
         self.last_model = ""
 
     @property
@@ -365,7 +366,8 @@ class StoryGenerator:
             custom_instructions=custom_instructions,
             long_form=long_form,
         )
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": user_prompt}]
+        messages = [{"role": "system", "content": self.system_prompt or SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}]
         data, pt, ct = await self._complete(messages, long_form)
         data = self._normalize(data, parts)
 

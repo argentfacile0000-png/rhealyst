@@ -28,6 +28,7 @@ from .scheduler import Scheduler
 log = logging.getLogger(__name__)
 
 PAUSE_KEY = "system_paused"
+STORY_PROMPT_KEY = "story_system_prompt"
 PORTAL_TTL = 1800  # validité d'un lien de connexion des comptes (s)
 MEDIA_SESSION_TTL = 2 * 3600  # validité du jeton de lecture des aperçus de la Mini App (s)
 
@@ -90,6 +91,7 @@ class Services:
         await self.apps.load()
         await self.pipeline.tts.keys.load()
         await self.pipeline.llm_keys.load()
+        self.pipeline.stories.system_prompt = await db.kv_get(STORY_PROMPT_KEY) or None
         await self._recover()
         await self.jobs.start()
         await self.scheduler.start()
@@ -119,6 +121,12 @@ class Services:
     # ------------------------------------------------------------------ pause globale
     async def is_paused(self) -> bool:
         return bool(await db.kv_get(PAUSE_KEY, False))
+
+    async def set_story_prompt(self, text: str | None) -> None:
+        """Prompt système des histoires : texte personnalisé, ou None pour revenir à l'original."""
+        await db.kv_set(STORY_PROMPT_KEY, text or "")
+        self.pipeline.stories.system_prompt = text or None
+        await db.log_event("Prompt des histoires " + ("personnalisé" if text else "rétabli à l'original"))
 
     async def set_paused(self, paused: bool) -> None:
         await db.kv_set(PAUSE_KEY, paused)
