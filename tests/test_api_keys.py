@@ -245,7 +245,9 @@ async def test_custom_short_and_long_durations(svc):
     await click(ctx, f"co:{ch.id}:duration:{custom}")
     assert ctx.user_data["await"] == {"kind": "field", "cid": ch.id, "key": "duration"}
     m = await type_text(ctx, "5")
-    assert "entre 10 et 600" in m.replies[-1]
+    assert "entre 10 et 1200" in m.replies[-1]
+    m = await type_text(ctx, "1300")
+    assert "entre 10 et 1200" in m.replies[-1]
     await type_text(ctx, "75 à 40")
     c = await svc.get_channel(ch.id)
     assert (c.min_seconds, c.max_seconds) == (40, 75)
@@ -257,3 +259,21 @@ async def test_custom_short_and_long_durations(svc):
     await type_text(ctx, "6-10")
     c = await svc.get_channel(ch.id)
     assert (c.long_min_minutes, c.long_max_minutes) == (6, 10)
+
+
+async def test_custom_split_duration(svc):
+    from storyforge.bot.fields import FIELD_MAP
+
+    ch = await svc.create_channel("Découpe libre")
+    ctx, _ = make_ctx(svc)
+    custom = len(FIELD_MAP["split_seconds"].options) - 1
+    await click(ctx, f"co:{ch.id}:split_seconds:{custom}")
+    m = await type_text(ctx, "1500")
+    assert "entre 10 et 1200" in m.replies[-1]
+    await type_text(ctx, "180")
+    assert (await svc.get_channel(ch.id)).split_seconds == 180
+    await click(ctx, f"co:{ch.id}:split_seconds:{custom}")
+    await type_text(ctx, "0")
+    assert (await svc.get_channel(ch.id)).split_seconds == 0
+    await svc.update_channel(ch.id, min_seconds=900, max_seconds=1200)
+    assert (await svc.get_channel(ch.id)).max_seconds == 1200

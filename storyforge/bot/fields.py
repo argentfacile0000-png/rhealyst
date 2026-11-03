@@ -131,8 +131,21 @@ def _range(text: str, lo: int, hi: int, unit: str) -> tuple[int, int]:
 
 
 def _custom_seconds(text: str) -> dict[str, Any]:
-    a, b = _range(text, 10, 600, "secondes")
+    a, b = _range(text, 10, 1200, "secondes")
     return {"min_seconds": a, "max_seconds": b}
+
+
+def _custom_split(text: str) -> dict[str, Any]:
+    t = text.strip().lower()
+    if t in ("0", "non", "aucun", "désactivé", "desactive"):
+        return {"split_seconds": 0}
+    nums = re.findall(r"\d+", t)
+    if len(nums) != 1:
+        raise ValueError("Envoie une durée en secondes, par exemple 75 (ou 0 pour désactiver)")
+    value = int(nums[0])
+    if not 10 <= value <= 1200:
+        raise ValueError("La durée d'une partie doit être entre 10 et 1200 secondes")
+    return {"split_seconds": value}
 
 
 def _custom_minutes(text: str) -> dict[str, Any]:
@@ -174,9 +187,14 @@ FIELDS: list[Field] = [
           show=lambda c: f"{c.min_seconds}–{c.max_seconds} s" if c.min_seconds != c.max_seconds else f"{c.min_seconds} s",
           apply=_duration_apply, parse=_custom_seconds,
           hint="Envoie la durée des Shorts en secondes : une plage ou une valeur.\n"
-               "<i>Exemples : 40-75, 50 à 70, 60. Entre 10 et 600 s.</i>"),
+               "<i>Exemples : 40-75, 50 à 70, 60. Entre 10 et 1200 s.</i>"),
     Field("split_seconds", "Découpage en parties", "content", "choice",
-          options=[("Désactivé", 0), ("Parties de 60 s", 60), ("Parties de 90 s", 90), ("Parties de 120 s", 120)]),
+          options=[("Désactivé", 0), ("Parties de 60 s", 60), ("Parties de 90 s", 90), ("Parties de 120 s", 120),
+                   ("Personnalisé…", "custom")],
+          show=lambda c: f"parties de {c.split_seconds} s max" if c.split_seconds else "désactivé",
+          parse=_custom_split,
+          hint="Envoie la durée maximale d'une partie, en secondes (entre 10 et 1200).\n"
+               "<i>Exemples : 75, 180. Envoie 0 pour désactiver le découpage.</i>"),
     Field("long_enabled", "Vidéos longues YouTube", "content", "toggle"),
     Field("long_duration", "Durée des vidéos longues", "content", "choice",
           options=[("5–8 min", "5-8"), ("8–12 min", "8-12"), ("12–20 min", "12-20"), ("20–30 min", "20-30"),
