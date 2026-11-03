@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -118,6 +120,26 @@ def _speed(text: str) -> dict[str, Any]:
     return {"bg_speed": round(value, 2)}
 
 
+def _range(text: str, lo: int, hi: int, unit: str) -> tuple[int, int]:
+    nums = [int(x) for x in re.findall(r"\d+", text)]
+    if not 1 <= len(nums) <= 2:
+        raise ValueError(f"Envoie une durée en {unit} ou une plage, par exemple 40-75")
+    a, b = (nums[0], nums[0]) if len(nums) == 1 else sorted(nums)
+    if a < lo or b > hi:
+        raise ValueError(f"La durée doit être entre {lo} et {hi} {unit}")
+    return a, b
+
+
+def _custom_seconds(text: str) -> dict[str, Any]:
+    a, b = _range(text, 10, 600, "secondes")
+    return {"min_seconds": a, "max_seconds": b}
+
+
+def _custom_minutes(text: str) -> dict[str, Any]:
+    a, b = _range(text, 3, 60, "minutes")
+    return {"long_min_minutes": a, "long_max_minutes": b}
+
+
 def _duration_apply(v: str) -> dict[str, Any]:
     lo, hi = (int(x) for x in v.split("-"))
     return {"min_seconds": lo, "max_seconds": hi}
@@ -147,16 +169,23 @@ FIELDS: list[Field] = [
     Field("shorts_enabled", "Shorts verticaux", "content", "toggle"),
     Field("duration", "Durée des Shorts", "content", "choice",
           options=[("30–45 s", "30-45"), ("45–60 s", "45-60"), ("65–95 s", "65-95"), ("90–120 s", "90-120"),
-                   ("120–170 s", "120-170")],
+                   ("120–170 s", "120-170"), ("Personnalisée…", "custom")],
           current=lambda c: f"{c.min_seconds}-{c.max_seconds}",
-          show=lambda c: f"{c.min_seconds}–{c.max_seconds} s", apply=_duration_apply),
+          show=lambda c: f"{c.min_seconds}–{c.max_seconds} s" if c.min_seconds != c.max_seconds else f"{c.min_seconds} s",
+          apply=_duration_apply, parse=_custom_seconds,
+          hint="Envoie la durée des Shorts en secondes : une plage ou une valeur.\n"
+               "<i>Exemples : 40-75, 50 à 70, 60. Entre 10 et 600 s.</i>"),
     Field("split_seconds", "Découpage en parties", "content", "choice",
           options=[("Désactivé", 0), ("Parties de 60 s", 60), ("Parties de 90 s", 90), ("Parties de 120 s", 120)]),
     Field("long_enabled", "Vidéos longues YouTube", "content", "toggle"),
     Field("long_duration", "Durée des vidéos longues", "content", "choice",
-          options=[("5–8 min", "5-8"), ("8–12 min", "8-12"), ("12–20 min", "12-20"), ("20–30 min", "20-30")],
+          options=[("5–8 min", "5-8"), ("8–12 min", "8-12"), ("12–20 min", "12-20"), ("20–30 min", "20-30"),
+                   ("Personnalisée…", "custom")],
           current=lambda c: f"{c.long_min_minutes}-{c.long_max_minutes}",
-          show=lambda c: f"{c.long_min_minutes}–{c.long_max_minutes} min", apply=_long_duration_apply),
+          show=lambda c: f"{c.long_min_minutes}–{c.long_max_minutes} min", apply=_long_duration_apply,
+          parse=_custom_minutes,
+          hint="Envoie la durée des vidéos longues en minutes : une plage ou une valeur.\n"
+               "<i>Exemples : 6-10, 15. Entre 3 et 60 min.</i>"),
     # --- Apparence : fond, sous-titres, son
     Field("bg_categories", "Vidéos de fond", "look", "multi",
           show=lambda c: ", ".join(c.bg_categories) if c.bg_categories else "toutes"),

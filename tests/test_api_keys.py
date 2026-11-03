@@ -234,3 +234,26 @@ async def test_add_aws_key_and_choose_models_from_the_bot(svc, monkeypatch):
     assert svc.pipeline.llm_keys.get(g.kid).model == "openai/gpt-oss-120b"
     q = await click(ctx, "ak")
     assert "modèle openai/gpt-oss-120b" in q.edits[-1] and "modèle amazon.nova-pro-v1:0, us-east-2" in q.edits[-1]
+
+
+async def test_custom_short_and_long_durations(svc):
+    from storyforge.bot.fields import FIELD_MAP
+
+    ch = await svc.create_channel("Durées")
+    ctx, _ = make_ctx(svc)
+    custom = len(FIELD_MAP["duration"].options) - 1
+    await click(ctx, f"co:{ch.id}:duration:{custom}")
+    assert ctx.user_data["await"] == {"kind": "field", "cid": ch.id, "key": "duration"}
+    m = await type_text(ctx, "5")
+    assert "entre 10 et 600" in m.replies[-1]
+    await type_text(ctx, "75 à 40")
+    c = await svc.get_channel(ch.id)
+    assert (c.min_seconds, c.max_seconds) == (40, 75)
+    await click(ctx, f"co:{ch.id}:duration:{custom}")
+    await type_text(ctx, "60")
+    c = await svc.get_channel(ch.id)
+    assert (c.min_seconds, c.max_seconds) == (60, 60) and FIELD_MAP["duration"].value_text(c) == "60 s"
+    await click(ctx, f"co:{ch.id}:long_duration:{len(FIELD_MAP['long_duration'].options) - 1}")
+    await type_text(ctx, "6-10")
+    c = await svc.get_channel(ch.id)
+    assert (c.long_min_minutes, c.long_max_minutes) == (6, 10)
