@@ -437,7 +437,7 @@ async def test_broken_and_cut_replies_are_repaired_or_retried(svc):
 
     async def create(**kw):
         seen.append(kw["messages"][-1]["content"])
-        content, reason = replies.pop(0)
+        content, reason = replies.pop(0) if replies else ('{"title": "x", "parts": ["encore', "length")
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content), finish_reason=reason)],
                                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1))
 
@@ -447,7 +447,14 @@ async def test_broken_and_cut_replies_are_repaired_or_retried(svc):
     assert story.title == "La facture" and story.parts[0].endswith("reçu.")
     assert "cut off" in seen[1]
 
-    # Coupée deux fois : message clair
+    # Réponse coupée puis vraie suite : les morceaux sont recollés (avec chevauchement retiré)
+    replies[:] = [(full[:60], "length"), (full[50:120], "length"), (full[120:], "stop")]
+    seen.clear()
+    story = await gen.generate(language="fr", seconds_per_part=6)
+    assert story.title == "La facture" and story.parts[0].endswith("reçu.")
+    assert "Continue EXACTLY" in seen[1]
+
+    # Coupée à chaque fois : message clair
     replies[:] = [("{" + '"title": "x", "parts": ["une histoire', "length"), ('{"title": "x", "parts": ["encore', "length")]
     with pytest.raises(gen_mod.StoryError, match="coupée deux fois"):
         await gen.generate(language="fr", seconds_per_part=6)

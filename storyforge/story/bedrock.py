@@ -53,15 +53,15 @@ def _raise_for(resp: httpx.Response, model: str) -> None:
 
 
 async def converse(key: str, region: str, model: str, messages: list[dict], *, max_tokens: int = 8192,
-                   temperature: float | None = None, timeout: float = 300) -> SimpleNamespace:
+                   temperature: float | None = None, timeout: float = 600) -> SimpleNamespace:
     system = [{"text": m["content"]} for m in messages if m["role"] == "system"]
     convo = [{"role": m["role"], "content": [{"text": m["content"]}]} for m in messages
              if m["role"] in ("user", "assistant")]
     url = (f"https://bedrock-runtime.{region}.amazonaws.com/model/"
            f"{urllib.parse.quote(model, safe='')}/converse")
-    cap = max(256, min(int(max_tokens), 32000))
+    cap = max(256, min(int(max_tokens), 64000))
     async with httpx.AsyncClient(timeout=timeout) as client:
-        for attempt in range(2):
+        for attempt in range(4):
             body: dict = {"messages": convo, "inferenceConfig": {"maxTokens": cap}}
             if system:
                 body["system"] = system
@@ -71,9 +71,10 @@ async def converse(key: str, region: str, model: str, messages: list[dict], *, m
                 resp = await client.post(url, json=body, headers=_headers(key))
             except httpx.HTTPError as exc:
                 raise BedrockError(f"AWS Bedrock injoignable : {exc}", 60, "injoignable") from exc
-            # Certains modèles acceptent moins de jetons de sortie : nouvel essai avec une limite plus basse.
-            if resp.status_code == 400 and attempt == 0 and "token" in resp.text.lower() and cap > 4096:
-                cap = 4096
+            # Certains modèles acceptent moins de jetons de sortie : nouvel essai avec une limite plus basse
+            # (la suite d'une réponse coupée est ensuite demandée par le générateur).
+            if resp.status_code == 400 and attempt < 3 and "token" in resp.text.lower() and cap > 4096:
+                cap = next(c for c in (32000, 16000, 8192, 4096) if c < cap)
                 continue
             _raise_for(resp, model)
             break
@@ -81,8 +82,9 @@ async def converse(key: str, region: str, model: str, messages: list[dict], *, m
     parts = (((data.get("output") or {}).get("message") or {}).get("content")) or []
     text = "".join(p.get("text", "") for p in parts if isinstance(p, dict))
     usage = data.get("usage") or {}
+    reason = "length" if data.get("stopReason") == "max_tokens" else "stop"
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
+        choices=[SimpleNamespace(message=SimpleNamespace(content=text), finish_reason=reason)],
         usage=SimpleNamespace(prompt_tokens=usage.get("inputTokens", 0), completion_tokens=usage.get("outputTokens", 0)),
     )
 

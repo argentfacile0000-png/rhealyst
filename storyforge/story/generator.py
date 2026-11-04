@@ -137,6 +137,19 @@ def reply_is_closed(content: str) -> bool:
     return re.sub(r"\s*```\s*$", "", (content or "").strip()).endswith("}")
 
 
+CONTINUE_PROMPT = ("Your answer was cut off by the output length limit. Continue EXACTLY from the last character "
+                   "you wrote, without repeating anything and without starting over: output only the remaining "
+                   "characters of the same JSON object, until its final closing brace. No Markdown fences.")
+
+
+def join_continuation(head: str, tail: str) -> str:
+    """Recolle la suite d'une réponse coupée, en retirant un éventuel chevauchement répété."""
+    for k in range(min(len(head), len(tail), 300), 9, -1):
+        if head.endswith(tail[:k]):
+            return head + tail[k:]
+    return head + tail
+
+
 def _error_text(exc: Exception) -> str:
     """Texte complet d'une erreur d'API (certains fournisseurs mettent le message dans le corps)."""
     parts = [str(exc), str(getattr(exc, "body", "") or "")]
@@ -176,6 +189,7 @@ class StoryGenerator:
         self.system_prompt: str | None = None  # prompt système personnalisé (dashboard) ; None = original
         self.last_model = ""
         self.exchanges: list[dict] = []  # requêtes / réponses brutes de la dernière génération (mode débogage)
+        self.need_tokens = 0  # limite de sortie nécessaire pour la longueur demandée
 
     @property
     def client(self) -> AsyncOpenAI:
@@ -204,6 +218,12 @@ class StoryGenerator:
         else:
             kwargs["max_tokens"] = 12000 if long_form else 4096
             kwargs["temperature"] = self.settings.openai_temperature
+        if llm.provider == "bedrock":
+            kwargs["max_tokens"] = 32000  # Bedrock réduit tout seul si le modèle accepte moins
+        # Limite de sortie adaptée à la longueur demandée (une histoire de 20 min dépasse 8 000 jetons).
+        for k in ("max_tokens", "max_completion_tokens"):
+            if k in kwargs and self.need_tokens:
+                kwargs[k] = min(max(kwargs[k], self.need_tokens), 32000)
         return kwargs
 
     @staticmethod
@@ -327,20 +347,48 @@ class StoryGenerator:
                             "max_tokens": 64})
         return f"{llm.label} · {llm.model}"
 
-    async def _complete(self, messages: list[dict], long_form: bool = False) -> tuple[dict, int, int]:
+    async def _ask(self, messages: list[dict], long_form: bool):
         import time as _time
 
         t0 = _time.monotonic()
         resp = await self._create(self._request_kwargs(messages, long_form), long_form)
         content = (resp.choices[0].message.content or "").strip()
+        reason = getattr(resp.choices[0], "finish_reason", None)
+        tokens = (getattr(resp.usage, "prompt_tokens", 0) or 0, getattr(resp.usage, "completion_tokens", 0) or 0)
         self.exchanges.append({"messages": list(messages), "reply": content, "model": self.last_model,
-                               "finish_reason": getattr(resp.choices[0], "finish_reason", None),
-                               "seconds": round(_time.monotonic() - t0, 1),
-                               "tokens": (getattr(resp.usage, "prompt_tokens", 0), getattr(resp.usage, "completion_tokens", 0))})
-        truncated = getattr(resp.choices[0], "finish_reason", None) == "length"
-        usage = resp.usage
-        pt = getattr(usage, "prompt_tokens", 0) or 0
-        ct = getattr(usage, "completion_tokens", 0) or 0
+                               "finish_reason": reason, "seconds": round(_time.monotonic() - t0, 1),
+                               "tokens": tokens})
+        return content, reason, tokens
+
+    async def _continue(self, messages: list[dict], content: str, long_form: bool) -> tuple[str, int, int]:
+        """Réponse coupée : on demande la suite exacte (jusqu'à 4 fois) et on recolle les morceaux."""
+        pt = ct = 0
+        for _ in range(4):
+            follow = messages + [
+                {"role": "assistant", "content": content},
+                {"role": "user", "content": CONTINUE_PROMPT},
+            ]
+            more, reason, (p, c) = await self._ask(follow, long_form)
+            pt, ct = pt + p, ct + c
+            more = re.sub(r"^```(?:json)?\s*", "", more)
+            if not more:
+                break
+            if re.match(r'\{\s*"title"', more):  # le modèle a tout recommencé au lieu de continuer
+                content = more
+            else:
+                content = join_continuation(content, more)
+            if reason != "length" and reply_is_closed(content):
+                break
+        return content, pt, ct
+
+    async def _complete(self, messages: list[dict], long_form: bool = False) -> tuple[dict, int, int]:
+        content, reason, (pt, ct) = await self._ask(messages, long_form)
+        truncated = reason == "length"
+        if content and (truncated or not reply_is_closed(content)) and content.lstrip("`json \n").startswith("{"):
+            log.warning("Réponse coupée (%s caractères) : demande de la suite", len(content))
+            content, p, c = await self._continue(messages, content, long_form)
+            pt, ct = pt + p, ct + c
+            truncated = not reply_is_closed(content)
         data = parse_json_reply(content)
         cut = truncated or not reply_is_closed(content)
         if data is None or cut:
@@ -431,6 +479,8 @@ class StoryGenerator:
         lang = get_language(language)
         dna = random_dna(narrator_gender, rng)
         words = words_for_duration(seconds_per_part, lang.code, voice_speed, speedup)
+        # ~2 jetons par mot (français, guillemets échappés) + métadonnées : marge pour ne pas couper l'histoire.
+        self.need_tokens = int(words * parts * 2.2) + 1500
 
         user_prompt = build_user_prompt(
             language=lang,
