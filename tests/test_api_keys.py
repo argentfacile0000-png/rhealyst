@@ -458,3 +458,9 @@ async def test_broken_and_cut_replies_are_repaired_or_retried(svc):
     replies[:] = [("{" + '"title": "x", "parts": ["une histoire', "length"), ('{"title": "x", "parts": ["encore', "length")]
     with pytest.raises(gen_mod.StoryError, match="coupée deux fois"):
         await gen.generate(language="fr", seconds_per_part=6)
+
+
+def test_mixed_dialogue_quotes_are_normalized():
+    from storyforge.story.generator import fix_quotes
+
+    assert fix_quotes('Il a dit «Pour rien." Puis "Oui."') == "Il a dit «Pour rien.» Puis «Oui.»"

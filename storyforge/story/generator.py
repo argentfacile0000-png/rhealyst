@@ -142,6 +142,20 @@ CONTINUE_PROMPT = ("Your answer was cut off by the output length limit. Continue
                    "characters of the same JSON object, until its final closing brace. No Markdown fences.")
 
 
+def fix_quotes(text: str) -> str:
+    """Guillemets mélangés (« ... ") : chaque " ferme le « ouvert, sinon en ouvre un."""
+    out, open_ = [], False
+    for ch in text:
+        if ch == "«":
+            open_ = True
+        elif ch == "»":
+            open_ = False
+        elif ch == '"':
+            ch, open_ = ("»", False) if open_ else ("«", True)
+        out.append(ch)
+    return "".join(out)
+
+
 def join_continuation(head: str, tail: str) -> str:
     """Recolle la suite d'une réponse coupée, en retirant un éventuel chevauchement répété."""
     for k in range(min(len(head), len(tail), 300), 9, -1):
@@ -433,7 +447,7 @@ class StoryGenerator:
         for key in ("narration", "story", "script", "text"):  # autres formats (prompt personnalisé)
             if not raw_parts and data.get(key):
                 raw_parts = [str(data[key])]
-        texts = [clean_narration(str(p)) for p in (raw_parts or []) if str(p).strip()]
+        texts = [fix_quotes(clean_narration(str(p))) for p in (raw_parts or []) if str(p).strip()]
         if not texts:
             raise StoryError("Le modèle n'a renvoyé aucune narration")
         if len(texts) > parts:
