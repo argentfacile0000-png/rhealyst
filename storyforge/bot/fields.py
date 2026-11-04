@@ -195,8 +195,8 @@ FIELDS: list[Field] = [
           parse=_custom_split,
           hint="Envoie la durée maximale d'une partie, en secondes (entre 10 et 1200).\n"
                "<i>Exemples : 75, 180. Envoie 0 pour désactiver le découpage.</i>"),
-    Field("long_enabled", "Vidéos longues YouTube", "content", "toggle"),
-    Field("long_duration", "Durée des vidéos longues", "content", "choice",
+    Field("long_enabled", "Version longue YouTube (histoire complète)", "content", "toggle"),
+    Field("long_duration", "Durée des vidéos longues", "hidden", "choice",
           options=[("5–8 min", "5-8"), ("8–12 min", "8-12"), ("12–20 min", "12-20"), ("20–30 min", "20-30"),
                    ("Personnalisée…", "custom")],
           current=lambda c: f"{c.long_min_minutes}-{c.long_max_minutes}",

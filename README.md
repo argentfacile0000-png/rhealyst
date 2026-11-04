@@ -113,14 +113,16 @@ Tout part de `/start` (et `/cancel` pour annuler une saisie) :
 - **Vidéos** : à valider et prêtes, programmées, en cours, prochains créneaux.
 - **Chaîne** : résumé, Activer / Générer, puis quatre sections :
   - **Contenu** : nom, langue, types d'histoires, narrateur, consignes, voix, rythme de narration, Shorts
-    (durée, découpage en parties), vidéos longues ;
+    (durée, découpage en parties), version longue YouTube : chaque histoire des Shorts existe aussi en entier,
+    en 16:9 et sans découpage, avec la même voix (durée = celle de l'histoire complète) ;
   - **Apparence** : vidéos de fond (catégories, vitesse, son), sous-titres (style, couleurs, position, label
     « Partie N »), carte d'accroche, bande son (volume, pistes) ;
   - **Planning** : horaires, fuseau, décalage aléatoire, validation manuelle, réserves ;
   - **Comptes** : connexion YouTube / TikTok / Instagram et réglages de publication.
 - **Vidéo** : Publier maintenant, Programmer, Valider ou Jeter ; « Plus d'actions » pour Aperçu, Texte complet,
   Régénérer, Archiver, Découper.
-- **Médias** : vidéos de fond et bande son (ajout par fichier ou par lien, envoyé à tout moment).
+- **Médias** : vidéos de fond et bande son (ajout par fichier ou par lien, envoyé à tout moment ; chaque catégorie
+  liste ses vidéos avec durée et taille, et permet de les supprimer).
 - **Réglages** : Clés API, Plateformes, Réglages YouTube, Journal, État du système, mises à jour auto.
 
 **La Mini App** (optionnelle) s'ouvre dans Telegram : indicateurs du jour, graphique des publications

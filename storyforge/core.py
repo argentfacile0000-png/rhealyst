@@ -236,6 +236,10 @@ class Services:
             channels = (await s.execute(select(Channel).where(Channel.active.is_(True)))).scalars().all()
         for ch in channels:
             for kind in ch.formats_enabled():
+                # La version longue naît avec chaque histoire des Shorts : pas de génération à part, sauf si les
+                # Shorts sont désactivés.
+                if kind == VideoFormat.HORIZONTAL and ch.shorts_enabled:
+                    continue
                 # Une génération à la fois par chaîne et par format (une série remplit plusieurs places).
                 if self.jobs.count(kind="generate", channel_id=ch.id, tag=kind):
                     continue

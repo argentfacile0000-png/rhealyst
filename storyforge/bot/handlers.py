@@ -491,6 +491,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await q.answer("Annulation…")
     elif head in ("lkc", "lkn", "lkm"):
         await link_destination(update, context, head, parts)
+    elif head in ("bkv", "bkd", "bkD", "bkx"):
+        await bank_file_action(update, context, head, parts)
     elif head == "bkn":
         await q.answer()
         await prompt(update, context, "<b>Nouvelle catégorie</b>\n\nQuel nom ?\n<i>Exemples : cooking, minecraft, satisfying</i>",
@@ -863,6 +865,60 @@ async def link_destination(update: Update, context: ContextTypes.DEFAULT_TYPE, h
             return
         await q.answer(f"Téléchargement dans {cats[idx]}")
         background(context, chat_id, _download_bg(context, chat_id, url, cats[idx]))
+
+
+async def bank_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str, parts: list[str]) -> None:
+    """Banque vidéo : voir une catégorie, supprimer une vidéo (avec confirmation) ou une catégorie vide."""
+    svc = svc_of(context)
+    q = update.callback_query
+    nums = [int(p) for p in parts[1:] if p.isdigit()]
+    cats = sorted(svc.pipeline.bank.categories().keys())
+    cat_idx = nums[0] if nums else -1
+    if not 0 <= cat_idx < len(cats):
+        await q.answer("Catégorie introuvable", show_alert=True)
+        return
+    cat = cats[cat_idx]
+    files = sorted(svc.pipeline.bank.categories()[cat], key=lambda p: p.name.lower())
+    if head == "bkv":
+        await q.answer()
+        await show(update, context, await screens.bank_category(svc, cat_idx, nums[1] if len(nums) > 1 else 0))
+        return
+    if head == "bkx":
+        folder = svc.settings.backgrounds_dir / cat
+        if files:
+            await q.answer("La catégorie n'est pas vide", show_alert=True)
+            return
+        shutil.rmtree(folder, ignore_errors=True)
+        await db.log_event(f"Catégorie de fonds supprimée : {cat}")
+        await q.answer("Catégorie supprimée")
+        await show(update, context, await screens.bank(svc))
+        return
+    idx = nums[1] if len(nums) > 1 else -1
+    if not 0 <= idx < len(files):
+        await q.answer("Vidéo introuvable : la liste a changé", show_alert=True)
+        await show(update, context, await screens.bank_category(svc, cat_idx))
+        return
+    path = files[idx]
+    if head == "bkd":
+        await q.answer()
+        await show(update, context, (
+            f"<b>Supprimer « {esc(path.name)} » ?</b>\n\nLe fichier est effacé du serveur "
+            f"({path.stat().st_size / 1e6:.0f} Mo). Les vidéos déjà montées ne sont pas touchées.",
+            kb([[("Supprimer", f"bkD:{cat_idx}:{idx}"), ("Annuler", f"bkv:{cat_idx}:{idx // 8}")]]),
+        ))
+        return
+    root = svc.settings.backgrounds_dir.resolve()
+    if root not in path.resolve().parents:  # jamais en dehors de la banque
+        await q.answer("Fichier hors de la banque", show_alert=True)
+        return
+    path.unlink(missing_ok=True)
+    await db.log_event(f"Fond supprimé de « {cat} » : {path.name}")
+    await q.answer("Vidéo supprimée")
+    remaining = sorted(svc.pipeline.bank.categories().keys())
+    if cat in remaining:
+        await show(update, context, await screens.bank_category(svc, remaining.index(cat), idx // 8))
+    else:
+        await show(update, context, await screens.bank(svc))
 
 
 def _cat_index(svc: Services, category: str) -> int:

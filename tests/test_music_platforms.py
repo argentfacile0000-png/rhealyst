@@ -323,3 +323,24 @@ async def test_tiktok_scopes_follow_the_app_mode(public):
     assert tiktok.effective_mode({"scope": "user.info.basic,video.upload"}, "direct") == "draft"
     assert tiktok.effective_mode({"scope": "user.info.basic,video.publish,video.upload"}, "direct") == "direct"
     assert tiktok.effective_mode({}, "direct") == "direct"  # ancien jeton sans information
+
+
+async def test_delete_background_videos_from_the_bot(svc):
+    from storyforge.bot import screens
+
+    from .conftest import make_video
+
+    make_video(svc.settings.backgrounds_dir / "cooking" / "autre.mp4", 2)
+    ctx, _ = make_ctx(svc)
+    text, markup = await screens.bank(svc)
+    assert any("cooking (2)" in b.text for r in markup.inline_keyboard for b in r)
+    q = await click(ctx, "bkv:0:0")  # cooking
+    assert "autre.mp4" in q.edits[-1] and "long.mp4" in q.edits[-1]
+    q = await click(ctx, "bkd:0:0")  # demande de confirmation
+    assert "Supprimer « autre.mp4 »" in q.edits[-1]
+    assert (svc.settings.backgrounds_dir / "cooking" / "autre.mp4").exists()
+    await click(ctx, "bkD:0:0")
+    assert not (svc.settings.backgrounds_dir / "cooking" / "autre.mp4").exists()
+    assert (svc.settings.backgrounds_dir / "cooking" / "long.mp4").exists()
+    q = await click(ctx, "bkD:0:5")  # index périmé : rien n'est supprimé
+    assert (svc.settings.backgrounds_dir / "cooking" / "long.mp4").exists()

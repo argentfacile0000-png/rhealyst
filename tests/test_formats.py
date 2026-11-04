@@ -50,7 +50,7 @@ async def test_long_form_video_goes_to_youtube_only(svc, monkeypatch):
     assert v.format == VideoFormat.HORIZONTAL and v.status == VideoStatus.READY
     assert _dims(v.file_path) == "960,540"  # format paysage (réglages de test 540×960)
     assert v.cover_path and Path(v.cover_path).exists()
-    assert "LONG-FORM" in prompts[0]["messages"][1]["content"] and prompts[0]["max_completion_tokens"] == 12000
+    assert "LONG-FORM" not in prompts[0]["messages"][1]["content"]  # même histoire que les Shorts
     assert await svc.next_ready_video(ch.id) is None  # le stock vertical est séparé
     assert (await svc.next_ready_video(ch.id, VideoFormat.HORIZONTAL)).id == vid
 
@@ -82,12 +82,17 @@ async def test_slots_and_refill_per_format(svc):
     assert {k for _, _, k in svc.scheduler.upcoming()} == {"vertical", "horizontal"}
     await svc.refill()
     assert svc.jobs.count(kind="generate", channel_id=ch.id, tag="vertical") == 1
-    assert svc.jobs.count(kind="generate", channel_id=ch.id, tag="horizontal") == 1
+    # La version longue naît avec l'histoire des Shorts : pas de génération à part
+    assert svc.jobs.count(kind="generate", channel_id=ch.id, tag="horizontal") == 0
     await svc.jobs._queues["generate"].join()
     assert await svc.buffer_count(ch.id, VideoFormat.HORIZONTAL) == 1
-    # Les Shorts désactivés : plus de créneau vertical
-    ch = await svc.update_channel(ch.id, shorts_enabled=False)
+    assert await svc.buffer_count(ch.id, VideoFormat.VERTICAL) == 1
+    # Les Shorts désactivés : plus de créneau vertical, la version longue se génère seule
+    ch = await svc.update_channel(ch.id, shorts_enabled=False, long_buffer_size=2)
     assert all(":vertical:" not in j.id for j in svc.scheduler.sched.get_jobs())
+    await svc.refill()
+    assert svc.jobs.count(kind="generate", channel_id=ch.id, tag="horizontal") == 1
+    await svc.jobs._queues["generate"].join()
 
 
 async def test_instagram_publish_with_signed_public_url(svc, monkeypatch):
@@ -213,7 +218,7 @@ async def test_bot_format_chooser_and_instagram(svc):
     q = await click(ctx, f"cv:{ch.id}")
     assert "Vidéos longues" in q.edits[-1] and "Instagram" in q.edits[-1]
     q = await click(ctx, f"cE:{ch.id}:content")
-    assert "Durée des vidéos longues" in q.edits[-1]
+    assert "Version longue YouTube (histoire complète)" in q.edits[-1]
 
 
 async def test_busy_file_tracks_running_jobs(tmp_path):
@@ -247,3 +252,29 @@ async def test_version_and_auto_update_toggle(svc, tmp_path, monkeypatch):
     assert version_mod.auto_update_flag(svc.settings.data_dir).exists()
     await click(ctx, "sau")
     assert not version_mod.auto_update_flag(svc.settings.data_dir).exists()
+
+
+async def test_long_version_is_the_full_short_story(svc, monkeypatch):
+    """Version longue YouTube = l'histoire des Shorts en entier (16:9, sans découpage, même voix)."""
+    ch = await svc.create_channel("Complète", long_enabled=True, split_seconds=5, min_seconds=8, max_seconds=9,
+                                  approval_required=True)
+    calls = []
+    real = svc.pipeline.tts.synthesize
+
+    async def spy(text, *a, **kw):
+        calls.append(text)
+        return await real(text, *a, **kw)
+
+    monkeypatch.setattr(svc.pipeline.tts, "synthesize", spy)
+    ids = await svc.pipeline.generate(ch.id)
+    videos = [await svc.get_video(i) for i in ids]
+    shorts = [v for v in videos if v.format == VideoFormat.VERTICAL]
+    longs = [v for v in videos if v.format == VideoFormat.HORIZONTAL]
+    assert len(shorts) >= 2 and len(longs) == 1  # Short découpé en parties, version longue entière
+    full = longs[0]
+    assert full.part_count == 1 and full.story_id == shorts[0].story_id
+    assert abs(full.duration - sum(v.duration for v in shorts)) < 1.5  # durée = histoire complète
+    assert _dims(full.file_path) == "960,540"
+    assert len(calls) == 1  # une seule voix ElevenLabs pour les deux formats
+    assert full.tts_chars == 0 and full.status == VideoStatus.PENDING_APPROVAL
+    assert not list(svc.settings.work_dir.glob("voice_story_*"))

@@ -121,7 +121,7 @@ async def generate_kind(svc: Services, cid: int) -> Screen:
         return "Chaîne introuvable.", kb([nav("cl")])
     lines = [title("Générer", ch.name), "", "Quel format ?", "",
              row("Short", f"vertical, {ch.min_seconds}–{ch.max_seconds} s") + "  " + muted("YouTube, TikTok, Instagram"),
-             row("Vidéo longue", f"16:9, {ch.long_min_minutes}–{ch.long_max_minutes} min") + "  " + muted("YouTube")]
+             row("Vidéo longue", "histoire complète en 16:9, sans découpage") + "  " + muted("YouTube")]
     rows = [[("Short", f"cg:{cid}:vertical"), ("Vidéo longue", f"cg:{cid}:horizontal")], [(BACK, f"cv:{cid}")]]
     return "\n".join(lines), kb(rows)
 
@@ -170,8 +170,7 @@ async def channel_view(svc: Services, cid: int) -> Screen:
         row("Histoires", _formats_label(ch)),
         row("Shorts", f"{ch.min_seconds}–{ch.max_seconds} s" + (f", parties de {ch.split_seconds} s" if ch.split_seconds
                                                               else "") if ch.shorts_enabled else "désactivés"),
-        row("Vidéos longues", f"{ch.long_min_minutes}–{ch.long_max_minutes} min, YouTube" if ch.long_enabled
-            else "désactivées"),
+        row("Vidéos longues", "histoire complète en 16:9, YouTube" if ch.long_enabled else "désactivées"),
         row("Voix", f"{ch.voice_name or ch.voice_id or 'par défaut'}"),
         row("Fonds", ", ".join(ch.bg_categories) or "toutes catégories"),
         row("Bande son", f"{round(ch.music_volume * 100)} %, {plural_tracks(ch.music_tracks)}" if ch.music_volume > 0
@@ -571,7 +570,9 @@ async def bank(svc: Services) -> Screen:
         lines += ["", row("Total", hhmm(total))]
     lines.append(row("Ajout par lien", "disponible" if ytdlp_command() else "yt-dlp non installé"))
     lines += ["", muted("Astuce : envoie un lien à tout moment, le bot te propose où l'ajouter.")]
-    return "\n".join(lines), kb([[("Ajouter (fichier ou lien)", "bka"), ("Rescanner", "bk")],
+    cats = sorted(summary)
+    cat_rows = [[(f"{c} ({summary[c]['files']})", f"bkv:{i}:0")] for i, c in enumerate(cats[:20])]
+    return "\n".join(lines), kb(cat_rows + [[("Ajouter (fichier ou lien)", "bka"), ("Rescanner", "bk")],
                                  [("Réglages YouTube (cookies, proxies)", "yt")], [("← Médias", "md"), (HOME, "h")]])
 
 
@@ -627,6 +628,41 @@ async def ytdlp_settings(svc: Services) -> Screen:
             + ([("Retester la liste", "ytlt"), ("Retirer la liste", "ytlx")] if plist["list"] else []),
             [("Tester avec YouTube", "ytt"), ("Ajouter une vidéo", "bka")],
             [("← Médias", "md"), ("← Réglages", "set")]]
+    return "\n".join(lines), kb(rows)
+
+
+async def bank_category(svc: Services, cat_idx: int, page: int = 0) -> Screen:
+    """Vidéos d'une catégorie de fonds : durée, taille, suppression."""
+    cats = sorted(svc.pipeline.bank.categories().keys())
+    if not 0 <= cat_idx < len(cats):
+        return "Catégorie introuvable.", kb([[("← Vidéos de fond", "bk")]])
+    cat = cats[cat_idx]
+    files = sorted(svc.pipeline.bank.categories()[cat], key=lambda p: p.name.lower())
+    per = 8
+    pages = max(1, (len(files) + per - 1) // per)
+    page = max(0, min(page, pages - 1))
+    lines = [title("Vidéos de fond", cat), muted(f"{plural(len(files), 'vidéo')}" + (f", page {page + 1} sur {pages}"
+                                                                                     if pages > 1 else "")), ""]
+    rows: list[list] = []
+    for i, f in enumerate(files[page * per:(page + 1) * per], start=page * per):
+        try:
+            dur = await svc.pipeline.bank.duration(f)
+        except Exception:
+            dur = 0.0
+        size = f.stat().st_size / 1e6 if f.exists() else 0
+        lines.append(f"{i + 1}. {esc(short(f.name, 44))}  {muted(f'{mmss(dur)} · {size:.0f} Mo')}")
+        rows.append([(f"Supprimer {i + 1}. {short(f.name, 28)}", f"bkd:{cat_idx}:{i}")])
+    if not files:
+        lines.append(muted("Catégorie vide."))
+        rows.append([("Supprimer la catégorie", f"bkx:{cat_idx}")])
+    pager = []
+    if page > 0:
+        pager.append(("← Précédentes", f"bkv:{cat_idx}:{page - 1}"))
+    if page < pages - 1:
+        pager.append(("Suivantes →", f"bkv:{cat_idx}:{page + 1}"))
+    if pager:
+        rows.append(pager)
+    rows.append([("Ajouter ici", f"bkc:{cat_idx}"), ("← Vidéos de fond", "bk")])
     return "\n".join(lines), kb(rows)
 
 

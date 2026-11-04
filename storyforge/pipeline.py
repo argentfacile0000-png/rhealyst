@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import html
 import logging
 import random
@@ -93,25 +94,26 @@ class Pipeline:
                     select(Story.title).where(Story.channel_id == channel_id).order_by(Story.id.desc()).limit(30)
                 )
             ).scalars().all()
-        long_form = kind == VideoFormat.HORIZONTAL
+        # La vidéo longue YouTube est la version complète (16:9, sans découpage) de l'histoire des Shorts :
+        # même histoire, même voix, durée = celle de l'histoire entière.
+        long_only = kind == VideoFormat.HORIZONTAL
+        with_long = long_only or (ch.long_enabled and kind == VideoFormat.VERTICAL)
         progress = progress or await self.notifier.progress(
-            f"{'Vidéo longue' if long_form else 'Génération'} · {ch.name}")
+            f"{'Vidéo longue' if long_only else 'Génération'} · {ch.name}")
         rng = random.Random()
         video_ids: list[int] = []
+        long_ids: list[int] = []
 
         try:
             await progress.update("story", "run")
-            if long_form:
-                lo, hi = sorted((ch.long_min_minutes * 60, ch.long_max_minutes * 60))
-            else:
-                lo, hi = sorted((ch.min_seconds, ch.max_seconds))
+            lo, hi = sorted((ch.min_seconds, ch.max_seconds))
             seconds = rng.uniform(lo, hi)
             gs = await self.stories.generate(
                 language=ch.language,
                 formats=ch.formats,
                 narrator_gender=ch.narrator_gender,
-                parts=1 if long_form else ch.parts,
-                long_form=long_form,
+                parts=1 if long_only else ch.parts,
+                long_form=False,
                 seconds_per_part=int(seconds),
                 voice_speed=ch.voice_speed,
                 speedup=ch.speedup,
@@ -135,12 +137,30 @@ class Pipeline:
                 detail=f"{fmt.emoji if fmt else ''} « {gs.title[:70]} » · {gs.word_count} mots",
             )
 
-            for i, text in enumerate(gs.parts, start=1):
-                vid = await self._render_part(ch, story_id, gs.title, gs.hook, i, len(gs.parts), text, progress, rng,
-                                              kind=kind)
-                video_ids.append(vid)
+            reuse: dict = {}  # voix de l'histoire complète, réutilisée pour la version longue
+            if not long_only:
+                for i, text in enumerate(gs.parts, start=1):
+                    vid = await self._render_part(ch, story_id, gs.title, gs.hook, i, len(gs.parts), text, progress,
+                                                  rng, kind=kind, reuse=reuse if len(gs.parts) == 1 else None)
+                    video_ids.append(vid)
+            if with_long:
+                try:
+                    long_ids.append(await self._render_part(
+                        ch, story_id, gs.title, gs.hook, 1, 1, " ".join(gs.parts), progress, rng,
+                        kind=VideoFormat.HORIZONTAL, reuse=reuse,
+                    ))
+                except Exception as exc:
+                    if long_only:
+                        raise
+                    log.exception("Version longue échouée")  # les Shorts restent utilisables
+                    await db.log_event(f"{ch.name} : version longue de « {gs.title[:60]} » échouée : {exc}",
+                                       "warning", ch.id)
+                finally:
+                    keep = reuse.get("dir")
+                    if keep:
+                        shutil.rmtree(keep, ignore_errors=True)
             # Découpage auto des Shorts trop longs en parties (Partie 1, 2…)
-            if not long_form and len(video_ids) == 1 and ch.split_seconds:
+            if not long_only and len(video_ids) == 1 and ch.split_seconds:
                 v = await self._get_video(video_ids[0])
                 if v and v.duration > ch.split_seconds + 2:
                     await progress.update("finish", "run", detail=f"découpage en parties de {ch.split_seconds} s max")
@@ -148,9 +168,9 @@ class Pipeline:
                     await progress.update("finish", "done", detail=f"{len(video_ids)} parties")
         except Exception as exc:
             # Une série incomplète ne doit pas être publiée : les parties déjà montées passent en échec.
-            if video_ids:
+            if video_ids or long_ids:
                 async with db.session() as s:
-                    for vid in video_ids:
+                    for vid in video_ids + long_ids:
                         v = await s.get(Video, vid)
                         if v:
                             v.status = VideoStatus.FAILED
@@ -160,18 +180,23 @@ class Pipeline:
             raise
 
         status = VideoStatus.PENDING_APPROVAL if ch.approval_required else VideoStatus.READY
+        first = (video_ids or long_ids)[0]
         async with db.session() as s:
-            for vid in video_ids:
+            for vid in video_ids + long_ids:
                 v = await s.get(Video, vid)
                 if v:
                     v.status = status
-                    v.publish_after = publish_after and vid == video_ids[0] and not ch.approval_required
+                    v.publish_after = publish_after and vid == first and not ch.approval_required
         n = len(video_ids)
+        done = [f"{n} Short{'s' if n > 1 else ''}"] if n else []
+        if long_ids:
+            done.append("version longue")
         await progress.finish(
-            ("Vidéo longue prête" if long_form else f"{n} vidéo{'s' if n > 1 else ''} prête{'s' if n > 1 else ''}")
+            (" + ".join(done) or "Rien") + " prêt" + ("s" if n > 1 or len(done) > 1 else "")
             + (" · en attente de validation" if ch.approval_required else "")
         )
-        await db.log_event(f"{ch.name} : « {gs.title[:80]} » générée ({n} partie{'s' if n > 1 else ''})", "success", ch.id)
+        await db.log_event(f"{ch.name} : « {gs.title[:80]} » générée ({', '.join(done)})", "success", ch.id)
+        video_ids = video_ids + long_ids
 
         if ch.approval_required:
             for vid in video_ids:
@@ -194,7 +219,7 @@ class Pipeline:
 
     async def _render_part(
         self, ch: Channel, story_id: int, title: str, hook: str, index: int, count: int, text: str,
-        progress: Progress, rng: random.Random, *, kind: str = VideoFormat.VERTICAL,
+        progress: Progress, rng: random.Random, *, kind: str = VideoFormat.VERTICAL, reuse: dict | None = None,
     ) -> int:
         lang = get_language(ch.language)
         horizontal = kind == VideoFormat.HORIZONTAL
@@ -214,18 +239,27 @@ class Pipeline:
         workdir = self.settings.work_dir / f"video_{video_id}"
         workdir.mkdir(parents=True, exist_ok=True)
         try:
-            # 1) Voix
+            # 1) Voix (réutilisée pour la version longue : pas de seconde facture ElevenLabs)
             await progress.update("voice", "run", detail=part_txt.strip(" ·"))
-            tts = await self.tts.synthesize(
-                text,
-                ch.voice_id or self.settings.elevenlabs_default_voice_id,
-                VoiceSettings(
-                    stability=ch.voice_stability, similarity_boost=ch.voice_similarity,
-                    style=ch.voice_style, speed=ch.voice_speed,
-                ),
-                workdir,
-                speedup=ch.speedup,
-            )
+            if reuse is not None and reuse.get("tts"):
+                tts = reuse["tts"]
+            else:
+                tts = await self.tts.synthesize(
+                    text,
+                    ch.voice_id or self.settings.elevenlabs_default_voice_id,
+                    VoiceSettings(
+                        stability=ch.voice_stability, similarity_boost=ch.voice_similarity,
+                        style=ch.voice_style, speed=ch.voice_speed,
+                    ),
+                    workdir,
+                    speedup=ch.speedup,
+                )
+                if reuse is not None:
+                    keep = self.settings.work_dir / f"voice_story_{story_id}"
+                    keep.mkdir(parents=True, exist_ok=True)
+                    audio = keep / tts.audio_path.name
+                    shutil.copy2(tts.audio_path, audio)
+                    reuse.update(dir=keep, tts=dataclasses.replace(tts, audio_path=audio, characters=0))
             duration = tts.duration + 0.5
             await progress.update("voice", "done", detail=f"{fmt_ts(tts.duration)} de narration{part_txt}")
 

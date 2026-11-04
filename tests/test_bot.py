@@ -179,7 +179,7 @@ async def test_full_dashboard_navigation(svc, tmp_path):
     await click(ctx, f"cg:{cid}")
     await svc.jobs._queues["generate"].join()
     assert any("Génération" in t for t in bot.sent + bot.edited)
-    assert any("prête" in t for t in bot.edited)
+    assert any("prêt" in t for t in bot.edited)
     async with db.session() as s:
         vids = list((await s.execute(select(Video).where(Video.channel_id == cid))).scalars())
     target = next(x for x in vids if x.status == VideoStatus.PENDING_APPROVAL)
