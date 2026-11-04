@@ -91,7 +91,14 @@ class Services:
         await self.apps.load()
         await self.pipeline.tts.keys.load()
         await self.pipeline.llm_keys.load()
-        self.pipeline.stories.system_prompt = await db.kv_get(STORY_PROMPT_KEY) or None
+        custom = await db.kv_get(STORY_PROMPT_KEY) or None
+        if custom and custom.lstrip().startswith("VIRAL STORYTIME ENGINE") and "estimated_duration_seconds" in custom:
+            # Ancienne version du prompt « Viral Storytime Engine » (format de sortie incompatible) : la version
+            # adaptée au projet est désormais le prompt d'origine.
+            await db.kv_set(STORY_PROMPT_KEY, "")
+            await db.log_event("Prompt des histoires : version adaptée du « Viral Storytime Engine » appliquée")
+            custom = None
+        self.pipeline.stories.system_prompt = custom
         await self._recover()
         await self.jobs.start()
         await self.scheduler.start()

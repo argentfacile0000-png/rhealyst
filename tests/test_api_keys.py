@@ -385,3 +385,33 @@ async def test_story_with_the_viral_master_prompt_format(svc):
 
     with _pytest.raises(gen_mod.StoryError, match="Début de la réponse : « still nope »"):
         await gen.generate(language="en", seconds_per_part=12)
+
+
+def test_system_prompt_and_request_ask_for_the_same_json():
+    import re as _re
+
+    from storyforge.story.prompts import SYSTEM_PROMPT, build_user_prompt
+    from storyforge.story.styles import FORMATS, get_language, random_dna
+
+    user = build_user_prompt(language=get_language("fr"), fmt=next(iter(FORMATS.values())), dna=random_dna("any"),
+                             parts=2, words_per_part=150, seconds_per_part=60, avoid_titles=[])
+    keys = _re.findall(r'^\s*"(\w+)":', user, flags=_re.M)
+    assert keys == ["title", "hook", "parts", "youtube_title", "description", "hashtags", "tiktok_caption",
+                    "category", "tone"]
+    for k in keys:
+        assert k in SYSTEM_PROMPT  # le prompt système annonce exactement les mêmes clés
+    assert "estimated_duration_seconds" not in SYSTEM_PROMPT and "American English" not in SYSTEM_PROMPT
+    assert "exactly 2 string(s)" in user and "French" in user
+
+
+async def test_old_viral_prompt_is_replaced_by_the_adapted_default(svc):
+    from storyforge.core import Services
+
+    await db.kv_set("story_system_prompt", "VIRAL STORYTIME ENGINE — MASTER SYSTEM PROMPT\n... "
+                                           '"estimated_duration_seconds": 180 ...')
+    s2 = Services(svc.settings)
+    await s2.start()
+    try:
+        assert s2.pipeline.stories.system_prompt is None and await db.kv_get("story_system_prompt") == ""
+    finally:
+        await s2.stop()

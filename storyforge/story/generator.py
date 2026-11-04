@@ -180,8 +180,8 @@ class StoryGenerator:
                 kwargs["temperature"] = self.settings.openai_temperature
                 kwargs["presence_penalty"] = 0.3
         elif llm.provider == "gemini":
-            # Les modèles Gemini récents « réfléchissent » : on limite la réflexion et on laisse de la marge.
-            kwargs["max_tokens"] = 24000 if long_form else 8192
+            # Les modèles Gemini récents « réfléchissent » (réflexion comptée dans la limite) : large marge.
+            kwargs["max_tokens"] = 32000 if long_form else 16384
             kwargs["temperature"] = self.settings.openai_temperature
             kwargs["reasoning_effort"] = "low"
         else:
@@ -313,6 +313,7 @@ class StoryGenerator:
     async def _complete(self, messages: list[dict], long_form: bool = False) -> tuple[dict, int, int]:
         resp = await self._create(self._request_kwargs(messages, long_form), long_form)
         content = (resp.choices[0].message.content or "").strip()
+        truncated = getattr(resp.choices[0], "finish_reason", None) == "length"
         usage = resp.usage
         pt = getattr(usage, "prompt_tokens", 0) or 0
         ct = getattr(usage, "completion_tokens", 0) or 0
@@ -332,6 +333,9 @@ class StoryGenerator:
             data = parse_json_reply(content2)
             if data is None:
                 start = re.sub(r"\s+", " ", content2 or content)[:160]
+                if truncated or getattr(resp.choices[0], "finish_reason", None) == "length":
+                    raise StoryError("Réponse du modèle coupée (limite de longueur atteinte) : choisis un modèle "
+                                     "plus grand ou une durée plus courte")
                 raise StoryError(f"Réponse du modèle illisible (JSON attendu). Début de la réponse : « {start} »"
                                  if start else "Réponse du modèle vide (limite de jetons atteinte ?)")
         return data, pt, ct

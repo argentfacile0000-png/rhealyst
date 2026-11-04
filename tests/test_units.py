@@ -258,7 +258,7 @@ async def test_gemini_params_and_fallback(settings):
     gen = StoryGenerator(settings, client=SimpleNamespace(chat=SimpleNamespace(completions=comp)))
     story = await gen.generate(language="fr", parts=2, seconds_per_part=10)
     first, retry = comp.calls[0], comp.calls[1]
-    assert first["model"] == "gemini-flash-latest" and first["max_tokens"] == 8192 and first["reasoning_effort"] == "low"
+    assert first["model"] == "gemini-flash-latest" and first["max_tokens"] == 16384 and first["reasoning_effort"] == "low"
     assert "presence_penalty" not in first and "max_completion_tokens" not in first
     assert set(retry) == {"model", "messages"}  # nouvel essai minimal
     assert story.model == "gemini-flash-latest" and len(story.parts) == 2
