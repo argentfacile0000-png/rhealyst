@@ -118,7 +118,23 @@ def parse_json_reply(content: str) -> dict | None:
             return data
         if isinstance(data, list) and data and isinstance(data[0], dict):
             return data[0]
+    # Dernier recours : réparation (guillemets de dialogue non échappés, virgules, objet non fermé…)
+    try:
+        from json_repair import repair_json
+
+        data = repair_json(candidates[-1], return_objects=True)
+    except Exception:
+        return None
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        data = data[0]
+    if isinstance(data, dict) and any(data.get(k) for k in ("parts", "narration", "story", "script", "text")):
+        return data
     return None
+
+
+def reply_is_closed(content: str) -> bool:
+    """Vrai si la réponse se termine par la fin de l'objet JSON (sinon elle a été coupée)."""
+    return re.sub(r"\s*```\s*$", "", (content or "").strip()).endswith("}")
 
 
 def _error_text(exc: Exception) -> str:
@@ -318,19 +334,27 @@ class StoryGenerator:
         pt = getattr(usage, "prompt_tokens", 0) or 0
         ct = getattr(usage, "completion_tokens", 0) or 0
         data = parse_json_reply(content)
-        if data is None:
-            # Une seconde chance : on montre au modèle sa réponse et on redemande le seul objet JSON.
-            log.warning("Réponse non JSON, nouvel essai : %s", content[:200])
+        cut = truncated or not reply_is_closed(content)
+        if data is None or cut:
+            # Une seconde chance : réponse illisible ou coupée, on redemande l'objet JSON complet.
+            log.warning("Réponse %s, nouvel essai : %s", "coupée" if cut else "non JSON", content[:200])
+            why = ("was cut off before the end" if cut else "was not a valid JSON object")
             retry = messages + [
                 {"role": "assistant", "content": content[:6000] or "(vide)"},
-                {"role": "user", "content": "Your previous answer was not a valid JSON object. Return the same story "
-                                            "again as exactly one valid JSON object, with no text before or after it."},
+                {"role": "user", "content": f"Your previous answer {why}. Return the complete story again as exactly "
+                                            "one valid JSON object, with no text before or after it, within the "
+                                            "requested length. Write dialogue with « » or single quotes, never with "
+                                            "double quotes."},
             ]
             resp = await self._create(self._request_kwargs(retry, long_form), long_form)
             content2 = (resp.choices[0].message.content or "").strip()
             pt += getattr(resp.usage, "prompt_tokens", 0) or 0
             ct += getattr(resp.usage, "completion_tokens", 0) or 0
             data = parse_json_reply(content2)
+            if data is not None and (getattr(resp.choices[0], "finish_reason", None) == "length"
+                                     or not reply_is_closed(content2)):
+                raise StoryError("Réponse du modèle coupée deux fois (limite de longueur) : choisis un modèle plus "
+                                 "grand ou une durée plus courte")
             if data is None:
                 start = re.sub(r"\s+", " ", content2 or content)[:160]
                 if truncated or getattr(resp.choices[0], "finish_reason", None) == "length":

@@ -64,7 +64,8 @@ reveal information, provide support, challenge assumptions, or affect events. Av
 perfect protagonists.
 
 8. DIALOGUE
-Use short, realistic quoted lines introduced simply ('She said...'). Dialogue must reveal character, deepen tension, \
+Use short, realistic quoted lines introduced simply ('She said...'), written with « » or single quotes, never with \
+double quotes (they would break the JSON output). Dialogue must reveal character, deepen tension, \
 expose hypocrisy, or change the situation. Avoid theatrical speeches and exposition that characters would not \
 naturally say.
 
@@ -204,7 +205,8 @@ Return ONLY this JSON object, with exactly these keys (all text in {language.nam
   "category": "the primary story category",
   "tone": "the dominant emotional tone"
 }}
-The "parts" array must contain exactly {parts} string(s). No other keys, no text outside the JSON."""
+The "parts" array must contain exactly {parts} string(s). No other keys, no text outside the JSON.
+Inside the strings, write dialogue with « » or single quotes, never with double quotes."""
 
 
 def build_length_fix_prompt(actual_words: int, target_words: int, parts: int) -> str:

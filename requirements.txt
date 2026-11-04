@@ -1,5 +1,7 @@
 python-telegram-bot>=21.6,<23
 openai>=1.40
+# Répare les réponses JSON abîmées des modèles (guillemets non échappés, objet non fermé)
+json-repair>=0.30
 httpx[socks]>=0.27
 sqlalchemy[asyncio]>=2.0.30
 aiosqlite>=0.20

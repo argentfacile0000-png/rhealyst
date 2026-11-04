@@ -378,7 +378,7 @@ async def test_story_with_the_viral_master_prompt_format(svc):
     story = await gen.generate(language="en", seconds_per_part=12)
     assert story.title == "The Toll Receipt" and story.parts[0].startswith("My sister borrowed my car")
     assert "family" in " ".join(story.hashtags).lower() and story.tiktok_caption.startswith("The Toll Receipt #")
-    assert len(calls) == 2 and "not a valid JSON" in calls[1][-1]["content"]
+    assert len(calls) == 2 and "cut off" in calls[1][-1]["content"]
 
     replies[:] = ["nope", "still nope"]
     import pytest as _pytest
@@ -415,3 +415,39 @@ async def test_old_viral_prompt_is_replaced_by_the_adapted_default(svc):
         assert s2.pipeline.stories.system_prompt is None and await db.kv_get("story_system_prompt") == ""
     finally:
         await s2.stop()
+
+
+async def test_broken_and_cut_replies_are_repaired_or_retried(svc):
+    from types import SimpleNamespace
+
+    from storyforge.story.generator import parse_json_reply
+
+    # Guillemets de dialogue non échappés : réparés
+    bad = ('```json\n{ "title": "Quelle est la pire vengeance accidentelle ?", "parts": [ "Ma sœur a dit '
+           '"jamais de la vie" et elle est partie. Trois jours plus tard, tout a changé." ], "hashtags": ["storytime"] }\n```')
+    data = parse_json_reply(bad)
+    assert data["parts"][0].startswith("Ma sœur a dit") and "jamais de la vie" in data["parts"][0]
+
+    # Réponse coupée (limite de longueur) : nouvel essai, la version complète est gardée
+    full = json.dumps({"title": "La facture", "hook": "Mon voisin m'a facturé ma propre haie.",
+                       "parts": ["Mon voisin m'a facturé ma propre haie. Et il avait gardé le reçu."],
+                       "hashtags": ["storytime"], "category": "voisins", "tone": "ironique"})
+    replies = [("```json\n" + full[:70], "length"), (full, "stop")]
+    seen = []
+
+    async def create(**kw):
+        seen.append(kw["messages"][-1]["content"])
+        content, reason = replies.pop(0)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content), finish_reason=reason)],
+                               usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1))
+
+    gen = svc.pipeline.stories
+    gen._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    story = await gen.generate(language="fr", seconds_per_part=6)
+    assert story.title == "La facture" and story.parts[0].endswith("reçu.")
+    assert "cut off" in seen[1]
+
+    # Coupée deux fois : message clair
+    replies[:] = [("{" + '"title": "x", "parts": ["une histoire', "length"), ('{"title": "x", "parts": ["encore', "length")]
+    with pytest.raises(gen_mod.StoryError, match="coupée deux fois"):
+        await gen.generate(language="fr", seconds_per_part=6)
