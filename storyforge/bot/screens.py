@@ -722,6 +722,7 @@ async def settings_screen(svc: Services) -> Screen:
         [("Clés API", "ak"), ("Plateformes", "pf")],
         [("Prompt des histoires", "sp0"), ("Réglages YouTube", "yt")],
         [("Journal", "ev"), ("État du système", "stt")],
+        [("Mode débogage", "dbg")],
     ]
     if version:
         rows.append([("Suspendre les mises à jour auto" if auto else "Réactiver les mises à jour auto", "sau")])
@@ -780,6 +781,54 @@ async def api_keys(svc: Services) -> Screen:
         lines += ["", muted("Les clés du .env sont reprises ici automatiquement ; pour en retirer une définitivement, "
                             "efface-la aussi du .env du serveur.")]
     rows.append([("← Réglages", "set"), (HOME, "h")])
+    return "\n".join(lines), kb(rows)
+
+
+async def debug_start(svc: Services) -> Screen:
+    chs = await svc.list_channels()
+    lines = [title("Mode débogage"),
+             muted("Génère une vidéo étape par étape : tu lances chaque étape avec un bouton et tu vois tout ce qui "
+                   "se passe (prompts, réponse brute de l'IA, voix, fond, sous-titres, montage), avec les fichiers. "
+                   "Rien n'est publié ; à la fin tu peux garder la vidéo."), "", "Quelle chaîne, quel format ?"]
+    rows = [[(f"{short(c.name, 22)} · Short", f"dbgc:{c.id}:v"), ("16:9", f"dbgc:{c.id}:h")] for c in chs[:12]]
+    if not chs:
+        lines.append(muted("Crée d'abord une chaîne."))
+    rows.append([("← Réglages", "set"), (HOME, "h")])
+    return "\n".join(lines), kb(rows)
+
+
+def debug_view(svc: Services, sess, running: str | None = None) -> Screen:
+    from ..debug import LABELS, STEPS
+
+    glyph = {"ok": CHECK, "error": CROSS, "todo": "○"}
+    lines = [title("Débogage", "16:9" if sess.horizontal else "Short"), ""]
+    last = None
+    for key, label in STEPS:
+        st = sess.steps[key]
+        mark = "…" if key == running else glyph[st.status]
+        timing = f"  {muted(f'{st.seconds} s')}" if st.status != "todo" else ""
+        lines.append(f"{mark}  {label}{timing}")
+        if st.status != "todo":
+            last = key
+    if running:
+        lines += ["", muted(f"{LABELS[running]} en cours…")]
+    elif last:
+        st = sess.steps[last]
+        lines += ["", f"<b>{LABELS[last]}</b>"]
+        body = "\n".join(st.lines)
+        lines.append(f"<blockquote expandable>{esc(body[-2800:])}</blockquote>" if body else muted("Aucun journal."))
+    rows: list[list] = []
+    if not running:
+        nxt = sess.next_step()
+        if nxt and sess.can_run(nxt):
+            rows.append([(f"▶ {LABELS[nxt]}", f"dbgr:{nxt}")])
+        if last:
+            rows.append([(f"↻ Refaire : {LABELS[last]}", f"dbgr:{last}"), ("Fichiers", f"dbgf:{last}")])
+        if last and last != "story":
+            rows.append([("↻ Tout reprendre à l'histoire", "dbgr:story")])
+        if sess.video_id:
+            rows.append([("Voir la vidéo enregistrée", f"v:{sess.video_id}")])
+    rows.append([("Arrêter le débogage", "dbgx")])
     return "\n".join(lines), kb(rows)
 
 

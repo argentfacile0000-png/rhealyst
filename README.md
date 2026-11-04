@@ -121,7 +121,11 @@ Tout part de `/start` (et `/cancel` pour annuler une saisie) :
   Régénérer, Archiver, Découper.
 - **Médias** : vidéos de fond et bande son (ajout par fichier ou par lien, envoyé à tout moment ; chaque catégorie
   liste ses vidéos avec durée et taille, et permet de les supprimer).
-- **Réglages** : Clés API, Plateformes, Réglages YouTube, Journal, État du système, mises à jour auto.
+- **Réglages** : Clés API, Plateformes, Prompt des histoires, Réglages YouTube, Journal, État du système, mises à
+  jour auto, et **Mode débogage** : une vidéo de test générée étape par étape (histoire, voix, fond, sous-titres,
+  montage, enregistrement), chaque étape lancée par un bouton, refaisable, avec ses journaux et ses fichiers
+  (prompts et réponse brute de l'IA, audio, image du fond, sous-titres, vidéo). Rien n'est publié ; la vidéo peut
+  être gardée comme vidéo à valider.
 
 **La Mini App** (optionnelle) s'ouvre dans Telegram : indicateurs du jour, graphique des publications
 (infobulle au toucher et vue tableau), vidéos à valider avec lecteur, chaînes avec interrupteurs, dernières

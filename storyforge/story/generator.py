@@ -175,6 +175,7 @@ class StoryGenerator:
         self.on_event = None  # async (texte) : bascule de clé, pour prévenir l'admin
         self.system_prompt: str | None = None  # prompt système personnalisé (dashboard) ; None = original
         self.last_model = ""
+        self.exchanges: list[dict] = []  # requêtes / réponses brutes de la dernière génération (mode débogage)
 
     @property
     def client(self) -> AsyncOpenAI:
@@ -327,8 +328,15 @@ class StoryGenerator:
         return f"{llm.label} · {llm.model}"
 
     async def _complete(self, messages: list[dict], long_form: bool = False) -> tuple[dict, int, int]:
+        import time as _time
+
+        t0 = _time.monotonic()
         resp = await self._create(self._request_kwargs(messages, long_form), long_form)
         content = (resp.choices[0].message.content or "").strip()
+        self.exchanges.append({"messages": list(messages), "reply": content, "model": self.last_model,
+                               "finish_reason": getattr(resp.choices[0], "finish_reason", None),
+                               "seconds": round(_time.monotonic() - t0, 1),
+                               "tokens": (getattr(resp.usage, "prompt_tokens", 0), getattr(resp.usage, "completion_tokens", 0))})
         truncated = getattr(resp.choices[0], "finish_reason", None) == "length"
         usage = resp.usage
         pt = getattr(usage, "prompt_tokens", 0) or 0
@@ -348,6 +356,9 @@ class StoryGenerator:
             ]
             resp = await self._create(self._request_kwargs(retry, long_form), long_form)
             content2 = (resp.choices[0].message.content or "").strip()
+            self.exchanges.append({"messages": list(retry), "reply": content2, "model": self.last_model,
+                                   "finish_reason": getattr(resp.choices[0], "finish_reason", None), "seconds": None,
+                                   "tokens": (getattr(resp.usage, "prompt_tokens", 0), getattr(resp.usage, "completion_tokens", 0))})
             pt += getattr(resp.usage, "prompt_tokens", 0) or 0
             ct += getattr(resp.usage, "completion_tokens", 0) or 0
             data = parse_json_reply(content2)
@@ -413,6 +424,7 @@ class StoryGenerator:
         long_form: bool = False,
     ) -> GeneratedStory:
         rng = rng or random.Random()
+        self.exchanges = []
         parts = 1 if long_form else max(1, min(int(parts), 6))
         valid = [f for f in (formats or []) if f in FORMATS] or DEFAULT_FORMATS
         fmt = FORMATS[rng.choice(valid)]

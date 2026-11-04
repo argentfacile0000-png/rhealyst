@@ -456,6 +456,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await video_extra_action(update, context, head, parts)
     elif head in ("aka", "akd", "aku", "akr", "akm", "akmp", "akms", "akmo", "akg", "akgs", "akgo"):
         await api_key_action(update, context, head, parts)
+    elif head in ("dbg", "dbgc", "dbgr", "dbgf", "dbgx"):
+        await debug_action(update, context, head, parts)
     elif head in ("sp0", "spf", "spe", "spr"):
         await story_prompt_action(update, context, head)
     elif head in ("vm", "vml"):
@@ -1273,6 +1275,87 @@ async def receive_app_key(update: Update, context: ContextTypes.DEFAULT_TYPE, st
                                    f"✓ App {PLATFORM[platform]} enregistrée. Connecte maintenant ton compte : "
                                    f"Chaîne, puis Comptes.{note}", parse_mode=ParseMode.HTML)
     await show(update, context, await screens.platform_guide(svc, platform), new=True)
+
+
+# ---------------------------------------------------------------------------- mode débogage
+async def debug_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str, parts: list[str]) -> None:
+    from ..debug import STEP_FUNCS, DebugSession, run_step
+
+    svc = svc_of(context)
+    q = update.callback_query
+    chat = update.effective_chat.id
+    sess: DebugSession | None = context.user_data.get("debug")
+    if head == "dbg":
+        await q.answer()
+        await show(update, context, await screens.debug_start(svc))
+        return
+    if head == "dbgc":
+        if sess:
+            sess.cleanup()
+        cid = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        kind = VideoFormat.HORIZONTAL if len(parts) > 2 and parts[2] == "h" else VideoFormat.VERTICAL
+        sess = context.user_data["debug"] = DebugSession(cid, kind)
+        await q.answer("Session de débogage ouverte")
+        await show(update, context, screens.debug_view(svc, sess))
+        return
+    if sess is None:
+        await q.answer("Aucune session : Réglages, Mode débogage", show_alert=True)
+        return
+    if head == "dbgx":
+        sess.cleanup()
+        context.user_data.pop("debug", None)
+        await q.answer("Débogage arrêté")
+        await show(update, context, await screens.settings_screen(svc))
+        return
+    key = parts[1] if len(parts) > 1 and parts[1] in STEP_FUNCS else ""
+    if not key:
+        await q.answer()
+        return
+    if head == "dbgf":
+        await q.answer("Envoi des fichiers…")
+        await _send_debug_files(context, chat, sess.steps[key].files)
+        return
+    if not sess.can_run(key):
+        await q.answer("Termine d'abord les étapes précédentes", show_alert=True)
+        return
+    if sess.busy:
+        await q.answer("Une étape est déjà en cours", show_alert=True)
+        return
+    await q.answer()
+    await show(update, context, screens.debug_view(svc, sess, running=key))
+
+    async def work() -> None:
+        sess.busy = True
+        try:
+            with svc.jobs.hold():
+                log = await run_step(svc, sess, key)
+        finally:
+            sess.busy = False
+        await _send_debug_files(context, chat, log.files)
+        text, markup = screens.debug_view(svc, sess)
+        await context.bot.send_message(chat, text, parse_mode=ParseMode.HTML, reply_markup=markup)
+
+    background(context, chat, work())
+
+
+async def _send_debug_files(context: ContextTypes.DEFAULT_TYPE, chat: int, files: list) -> None:
+    import io
+
+    for name, item in files:
+        try:
+            data = io.BytesIO(item) if isinstance(item, bytes) else Path(item).open("rb")
+            with data as fh:
+                suffix = Path(name).suffix.lower()
+                if suffix in (".jpg", ".png"):
+                    await context.bot.send_photo(chat, photo=fh, caption=name)
+                elif suffix == ".mp4":
+                    await context.bot.send_video(chat, video=fh, caption=name, supports_streaming=True)
+                elif suffix == ".mp3":
+                    await context.bot.send_audio(chat, audio=fh, filename=name, title=name)
+                else:
+                    await context.bot.send_document(chat, document=fh, filename=name)
+        except (TelegramError, OSError) as exc:
+            await context.bot.send_message(chat, f"Fichier {name} non envoyé : {exc}"[:300])
 
 
 async def story_prompt_action(update: Update, context: ContextTypes.DEFAULT_TYPE, head: str) -> None:
