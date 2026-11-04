@@ -267,7 +267,8 @@ class Pipeline:
             await progress.update("background", "run")
             bg_speed = min(4.0, max(0.25, ch.bg_speed or 1.0))
             seg = await self.bank.pick(  # à 1,5×, il faut 1,5 fois plus de vidéo source
-                duration * bg_speed, categories=ch.bg_categories or None, recent=await self._recent_segments(), rng=rng
+                duration * bg_speed, categories=ch.bg_categories or None, recent=await self._recent_segments(), rng=rng,
+                orientation="horizontal" if horizontal else "vertical",  # pas de recadrage quand c'est possible
             )
             rel = seg.path.relative_to(self.settings.backgrounds_dir) if seg.path.is_relative_to(self.settings.backgrounds_dir) else seg.path.name
             await progress.update(

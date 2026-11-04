@@ -344,3 +344,34 @@ async def test_delete_background_videos_from_the_bot(svc):
     assert (svc.settings.backgrounds_dir / "cooking" / "long.mp4").exists()
     q = await click(ctx, "bkD:0:5")  # index périmé : rien n'est supprimé
     assert (svc.settings.backgrounds_dir / "cooking" / "long.mp4").exists()
+
+
+async def test_backgrounds_match_the_video_orientation(svc, tmp_path):
+    import random
+    import subprocess
+
+    from storyforge.video.background import BackgroundBank
+
+    from .conftest import make_video
+
+    root = tmp_path / "bank"
+    make_video(root / "jeux" / "paysage.mp4", 30, "640x360")
+    make_video(root / "jeux" / "portrait.mp4", 30, "360x640")
+    # Vidéo de téléphone : stockée en paysage, affichée en portrait (rotation 90°)
+    tel = make_video(tmp_path / "raw.mp4", 30, "640x360")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-display_rotation", "90", "-i", str(tel), "-c", "copy",
+                    str(root / "jeux" / "telephone.mp4")], check=True)
+    bank = BackgroundBank(root)
+    files = {f.path.name: f.orientation for f in await bank.scan()}
+    assert files == {"paysage.mp4": "horizontal", "portrait.mp4": "vertical", "telephone.mp4": "vertical"}
+    summary = await bank.summary()
+    assert summary["jeux"]["vertical"] == 2 and summary["jeux"]["horizontal"] == 1
+
+    for seed in range(10):
+        rng = random.Random(seed)
+        assert (await bank.pick(10, orientation="horizontal", rng=rng)).path.name == "paysage.mp4"
+        assert (await bank.pick(10, orientation="vertical", rng=rng)).path.name in ("portrait.mp4", "telephone.mp4")
+    # Aucun fond de la bonne orientation assez long : on prend quand même un fond (recadré) plutôt que d'échouer
+    assert (await bank.pick(40, orientation="horizontal")).path.name == "paysage.mp4"  # bouclé
+    (root / "jeux" / "paysage.mp4").unlink()
+    assert (await bank.pick(10, orientation="horizontal")).path.name in ("portrait.mp4", "telephone.mp4")

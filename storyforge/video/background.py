@@ -43,6 +43,14 @@ class BankFile:
     path: Path
     category: str
     duration: float
+    orientation: str = ""  # vertical | horizontal | square | "" (inconnue)
+
+
+def orientation_of(width: int, height: int) -> str:
+    if not width or not height:
+        return ""
+    ratio = width / height
+    return "horizontal" if ratio >= 1.2 else "vertical" if ratio <= 0.85 else "square"
 
 
 def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
@@ -147,24 +155,37 @@ class BackgroundBank:
         except OSError:
             log.warning("Impossible d'écrire le cache des durées")
 
-    async def duration(self, path: Path) -> float:
+    async def info(self, path: Path) -> dict:
+        """Durée et orientation (largeur/hauteur affichées, rotation des vidéos de téléphone comprise), en cache."""
         async with self._lock:
             cache = self._load_cache()
             st = path.stat()
             key = str(path.resolve())
             entry = cache.get(key)
-            if entry and entry.get("size") == st.st_size and entry.get("mtime") == int(st.st_mtime):
-                return float(entry["duration"])
-            dur = await probe_duration(path, self.ffprobe)
-            cache[key] = {"size": st.st_size, "mtime": int(st.st_mtime), "duration": dur}
+            fresh = entry and entry.get("size") == st.st_size and entry.get("mtime") == int(st.st_mtime)
+            if fresh and "orientation" in entry:
+                return entry
+            dur = float(entry["duration"]) if fresh else await probe_duration(path, self.ffprobe)
+            orientation = ""
+            if path.suffix.lower() in VIDEO_EXTS:
+                try:
+                    orientation = await _probe_orientation(path, self.ffprobe)
+                except Exception as exc:
+                    log.debug("Orientation inconnue pour %s : %s", path.name, exc)
+            entry = {"size": st.st_size, "mtime": int(st.st_mtime), "duration": dur, "orientation": orientation}
+            cache[key] = entry
             self._save_cache()
-            return dur
+            return entry
+
+    async def duration(self, path: Path) -> float:
+        return float((await self.info(path))["duration"])
 
     async def scan(self) -> list[BankFile]:
         files = []
         for p, c in self._iter_files():
             try:
-                files.append(BankFile(p, c, await self.duration(p)))
+                meta = await self.info(p)
+                files.append(BankFile(p, c, float(meta["duration"]), meta.get("orientation", "")))
             except Exception as exc:  # fichier corrompu : on l'ignore
                 log.warning("Fond ignoré %s: %s", p, exc)
         return files
@@ -172,9 +193,11 @@ class BackgroundBank:
     async def summary(self) -> dict[str, dict]:
         out: dict[str, dict] = {}
         for f in await self.scan():
-            s = out.setdefault(f.category, {"files": 0, "seconds": 0.0})
+            s = out.setdefault(f.category, {"files": 0, "seconds": 0.0, "vertical": 0, "horizontal": 0})
             s["files"] += 1
             s["seconds"] += f.duration
+            if f.orientation in ("vertical", "horizontal"):
+                s[f.orientation] += 1
         return out
 
     # --- tirage ------------------------------------------------------------
@@ -185,10 +208,13 @@ class BackgroundBank:
         categories: list[str] | None = None,
         recent: list[tuple[str, float, float]] | None = None,
         rng: random.Random | None = None,
+        orientation: str | None = None,
     ) -> Segment:
         """Choisit une vidéo au hasard dans les catégories puis une séquence au hasard.
 
         `recent` = [(chemin, début, fin)] des passages déjà utilisés à éviter.
+        `orientation` (vertical | horizontal) : les fonds de la même orientation que la vidéo à monter passent
+        en priorité (pas de recadrage) ; à défaut, n'importe quel fond assez long.
         """
         rng = rng or random.Random()
         files = await self.scan()
@@ -203,12 +229,42 @@ class BackgroundBank:
             )
 
         long_enough = [f for f in files if f.duration >= needed + 1]
+        if orientation:
+            same = [f for f in long_enough if f.orientation == orientation]
+            if same:
+                long_enough = same
+            else:
+                log.info("Aucun fond %s assez long : un fond d'une autre orientation sera recadré", orientation)
         if long_enough:
             chosen = rng.choice(long_enough)
             avoid = [(a, b) for (p, a, b) in (recent or []) if Path(p).resolve() == chosen.path.resolve()]
             start = choose_start(chosen.duration, needed, avoid=avoid, rng=rng)
             return Segment(chosen.path, start, needed, chosen.duration, loop=False)
 
-        chosen = max(files, key=lambda f: f.duration)
+        pool = [f for f in files if f.orientation == orientation] if orientation else []
+        chosen = max(pool or files, key=lambda f: f.duration)
         log.warning("Aucun fond assez long (%.0fs requis) — %s sera bouclé", needed, chosen.path.name)
         return Segment(chosen.path, 0.0, needed, chosen.duration, loop=True)
+
+
+async def _probe_orientation(path: Path, ffprobe: str = "ffprobe") -> str:
+    """Orientation à l'affichage : tient compte de la rotation (vidéos filmées au téléphone)."""
+    from .ffmpeg import ffprobe_json
+
+    info = await ffprobe_json(path, ffprobe)
+    for st in info.get("streams", []):
+        if st.get("codec_type") != "video" or not st.get("width"):
+            continue
+        w, h = int(st["width"]), int(st["height"])
+        rotation = 0
+        try:
+            rotation = int(float((st.get("tags") or {}).get("rotate", 0)))
+        except ValueError:
+            pass
+        for side in st.get("side_data_list") or []:
+            if "rotation" in side:
+                rotation = int(float(side["rotation"]))
+        if abs(rotation) % 180 == 90:
+            w, h = h, w
+        return orientation_of(w, h)
+    return ""

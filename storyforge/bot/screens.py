@@ -646,11 +646,13 @@ async def bank_category(svc: Services, cat_idx: int, page: int = 0) -> Screen:
     rows: list[list] = []
     for i, f in enumerate(files[page * per:(page + 1) * per], start=page * per):
         try:
-            dur = await svc.pipeline.bank.duration(f)
+            meta = await svc.pipeline.bank.info(f)
         except Exception:
-            dur = 0.0
+            meta = {"duration": 0.0}
+        dur = float(meta.get("duration", 0.0))
+        fmt = {"vertical": "9:16", "horizontal": "16:9", "square": "carré"}.get(meta.get("orientation", ""), "?")
         size = f.stat().st_size / 1e6 if f.exists() else 0
-        lines.append(f"{i + 1}. {esc(short(f.name, 44))}  {muted(f'{mmss(dur)} · {size:.0f} Mo')}")
+        lines.append(f"{i + 1}. {esc(short(f.name, 44))}  {muted(f'{mmss(dur)} · {fmt} · {size:.0f} Mo')}")
         rows.append([(f"Supprimer {i + 1}. {short(f.name, 28)}", f"bkd:{cat_idx}:{i}")])
     if not files:
         lines.append(muted("Catégorie vide."))
@@ -885,8 +887,15 @@ async def media(svc: Services) -> Screen:
     if summary:
         total = sum(i["seconds"] for i in summary.values())
         for cat, info in sorted(summary.items()):
-            lines.append(f"{esc(cat)}  <b>{plural(info['files'], 'vidéo')}</b>  {muted(hhmm(info['seconds']))}")
+            lines.append(f"{esc(cat)}  <b>{plural(info['files'], 'vidéo')}</b>  {muted(hhmm(info['seconds']))}  "
+                         + muted(f"{info['vertical']} verticale(s), {info['horizontal']} horizontale(s)"))
         lines.append(muted(f"Total {hhmm(total)}"))
+        chs = await svc.list_channels()
+        if any(c.long_enabled for c in chs) and not any(i["horizontal"] for i in summary.values()):
+            lines.append(muted("Aucun fond horizontal : les vidéos longues 16:9 recadreront des fonds verticaux. "
+                               "Ajoute des vidéos horizontales pour un rendu net."))
+        if any(c.shorts_enabled for c in chs) and not any(i["vertical"] for i in summary.values()):
+            lines.append(muted("Aucun fond vertical : les Shorts recadreront des fonds horizontaux."))
     else:
         lines.append(muted("Aucune vidéo de fond : ajoutes-en une pour pouvoir générer."))
     lines += ["", "<b>Bande son</b>"]
