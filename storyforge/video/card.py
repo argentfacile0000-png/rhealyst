@@ -135,3 +135,21 @@ def render_cover(frame: Path, title: str, out_path: Path, fonts_dir: Path, *, si
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.convert("RGB").save(out_path, "JPEG", quality=90)
     return out_path
+
+
+def render_card_cover(frame: Path, card_png: Path, out_path: Path, *, size: tuple[int, int] = (1280, 720)) -> Path:
+    """Miniature YouTube 16:9 : la carte d'accroche, centrée sur une image du fond floutée et assombrie."""
+    W, H = size
+    bg = Image.open(frame).convert("RGB")
+    scale = max(W / bg.width, H / bg.height)
+    bg = bg.resize((int(bg.width * scale) + 1, int(bg.height * scale) + 1))
+    left, top = (bg.width - W) // 2, (bg.height - H) // 2
+    bg = bg.crop((left, top, left + W, top + H)).filter(ImageFilter.GaussianBlur(6))
+    bg = Image.alpha_composite(bg.convert("RGBA"), Image.new("RGBA", (W, H), (0, 0, 0, 70)))
+    card = Image.open(card_png).convert("RGBA")
+    k = min(W * 0.78 / card.width, H * 0.92 / card.height)
+    card = card.resize((max(1, int(card.width * k)), max(1, int(card.height * k))), Image.LANCZOS)
+    bg.alpha_composite(card, ((W - card.width) // 2, (H - card.height) // 2))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    bg.convert("RGB").save(out_path, "JPEG", quality=92)
+    return out_path

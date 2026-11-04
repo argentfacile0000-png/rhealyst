@@ -278,3 +278,13 @@ async def test_long_version_is_the_full_short_story(svc, monkeypatch):
     assert len(calls) == 1  # une seule voix ElevenLabs pour les deux formats
     assert full.tts_chars == 0 and full.status == VideoStatus.PENDING_APPROVAL
     assert not list(svc.settings.work_dir.glob("voice_story_*"))
+
+
+async def test_youtube_thumbnail_is_the_hook_card(svc):
+    from PIL import Image
+
+    ch = await svc.create_channel("Miniature", min_seconds=5, max_seconds=6, hook_card=False)
+    [vid] = await svc.pipeline.generate(ch.id, kind=VideoFormat.HORIZONTAL)
+    img = Image.open((await svc.get_video(vid)).cover_path).convert("RGB")
+    assert img.size == (1280, 720)
+    assert img.getpixel((640, 300)) == (255, 255, 255) or min(img.getpixel((640, 300))) > 240  # carte blanche au centre

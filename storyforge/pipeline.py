@@ -26,7 +26,7 @@ from .tts import ElevenLabsClient, VoiceSettings
 from .tts.keys import KeyRing
 from .video.background import BackgroundBank
 from .video.captions import CaptionStyle, build_ass, hook_end_time
-from .video.card import render_cover, render_hook_card
+from .video.card import render_card_cover, render_hook_card
 from .video.ffmpeg import probe_dimensions
 from .story.llm_keys import LLMKeyRing
 from .video.music import MusicBank
@@ -331,7 +331,10 @@ class Pipeline:
                 if seg.source_duration:
                     at = min(at, max(0.0, seg.source_duration - 0.5))
                 frame = await grab_frame(seg.path, workdir / "frame.jpg", self.settings, at=at)
-                cover = render_cover(frame, title, out.with_name(out.stem + "_cover.jpg"), self.settings.fonts_dir)
+                # Miniature = la carte d'accroche de l'histoire (même rendu que dans les Shorts)
+                thumb_card = card_png or render_hook_card(hook or title, ch.name, workdir / "thumb_card.png",
+                                                          self.settings.fonts_dir, width=1080)
+                cover = render_card_cover(frame, thumb_card, out.with_name(out.stem + "_cover.jpg"))
             preview = await make_telegram_preview(out, out.with_name(out.stem + "_preview.mp4"), self.settings,
                                                   duration=duration)
             await progress.update("finish", "done")
