@@ -148,7 +148,8 @@ def test_words_and_sentence_helpers():
 
 def test_dna_and_formats():
     dna = random_dna("female", random.Random(0))
-    assert "woman" in dna.narrator
+    assert "woman" in dna.narrator or "girl" in dna.narrator
+    assert dna.premise and dna.leverage
     assert {"askreddit", "drama", "revenge", "aita"} <= set(FORMATS)
 
 

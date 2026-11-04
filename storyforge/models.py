@@ -63,7 +63,7 @@ class Channel(Base):
 
     # --- Histoire ----------------------------------------------------------
     language: Mapped[str] = mapped_column(String(8), default="fr")
-    formats: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["askreddit", "drama", "revenge"])
+    formats: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["stepfamily", "inlaws", "cheating", "bestfriend", "entitledfam", "drama", "revenge"])
     narrator_gender: Mapped[str] = mapped_column(String(10), default="any")  # any | female | male
     custom_instructions: Mapped[str] = mapped_column(Text, default="")
 

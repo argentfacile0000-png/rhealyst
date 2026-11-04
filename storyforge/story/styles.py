@@ -118,6 +118,53 @@ FORMATS: dict[str, StoryFormat] = {
             "headline",
         ),
         StoryFormat(
+            "stepfamily", "🏚️", "Belle-famille recomposée",
+            "Stepfamily injustice: a new stepparent moves in and pushes the narrator out (their room, their dead "
+            "parent's belongings, their money, their place at the table) while favoring their own child, and the "
+            "biological parent stays weak. Years of quiet survival, then the narrator discovers what the late parent "
+            "protected for them and takes everything back, legally, in front of the whole family.",
+            "headline",
+        ),
+        StoryFormat(
+            "inlaws", "👵", "Belle-mère toxique",
+            "Mother-in-law (or father-in-law) from hell: she never accepted the narrator, sabotages the wedding, the "
+            "baby, the house or the career, and turns relatives against them while the spouse avoids conflict. Receipts "
+            "pile up, the spouse finally sees it, and she is exposed at the event she cared about most.",
+            "headline",
+        ),
+        StoryFormat(
+            "cheating", "💍", "Infidélité démasquée",
+            "Cheating partner or fiance: an ordinary detail (a notification, a contact name, a receipt, a second phone) "
+            "reveals a betrayal far bigger than expected (several partners, a sibling, a best friend, a double life). "
+            "The narrator stays calm, gathers proof, finds the other victims, and exposes everything at the worst "
+            "possible moment for the cheater (engagement party, anniversary, family dinner). Clean, legal payback.",
+            "headline",
+        ),
+        StoryFormat(
+            "bestfriend", "🐍", "Fausse meilleure amie",
+            "Jealous best friend: for years she kept the narrator small ('you're the supportive friend type'), then "
+            "when the narrator finally gets something she wanted (a date, a job, a guy, attention) she sabotages it "
+            "(texts from the narrator's phone, lies, a smear post). The narrator fixes it quietly, the truth comes out "
+            "with screenshots, the friend group splits, and the narrator outgrows her.",
+            "headline",
+        ),
+        StoryFormat(
+            "comeback", "🌹", "Humiliation puis revanche",
+            "Public humiliation turned around: the narrator is mocked or rejected in front of everyone (a crush, a "
+            "classmate, a coworker, a family member), then time passes, roles flip, and the person who laughed needs "
+            "the narrator, begs, or finally understands. Can end with sweet revenge or a mature, earned "
+            "reconciliation; callback to the object or words of the humiliation.",
+            "headline",
+        ),
+        StoryFormat(
+            "entitledfam", "💸", "Famille profiteuse",
+            "Entitled family: parents or siblings demand the narrator's money, home, time or career (quit your job to "
+            "raise your brother's kids, pay for your sister's wedding, give us your house) and escalate to "
+            "manipulation and real wrongdoing (emails to the boss, identity misuse, lies to relatives). The narrator "
+            "sets boundaries, documents everything and lets the law and the truth do the rest.",
+            "headline",
+        ),
+        StoryFormat(
             "creepy", "👻", "Creepy (histoire vraie)",
             "Realistic creepy story (no supernatural gore): a stalker-ish neighbor, a strange babysitting night, "
             "a message that shouldn't exist, a rental with a locked room. Build dread with small wrong details. "
@@ -140,100 +187,150 @@ PITCHES = {
     "love": "Rendez-vous catastrophe, ex qui revient, mensonge qui s'effondre.",
     "wholesome": "Une bonne action qui revient des années plus tard.",
     "creepy": "Histoire inquiétante et réaliste, chute glaçante.",
+    "stepfamily": "Belle-mère qui efface l'enfant, le parent défunt avait tout prévu.",
+    "inlaws": "Belle-mère qui sabote le couple, démasquée devant toute la famille.",
+    "cheating": "Un détail révèle une double vie, la vérité éclate au pire moment.",
+    "bestfriend": "Amie jalouse qui sabote en secret, captures d'écran à l'appui.",
+    "comeback": "Humilié(e) en public, les rôles s'inversent des mois plus tard.",
+    "entitledfam": "Famille qui exige argent ou sacrifices, et finit par tout perdre.",
 }
 FORMATS = {k: replace(f, pitch=PITCHES.get(k, "")) for k, f in FORMATS.items()}
 
-DEFAULT_FORMATS = ["askreddit", "drama", "revenge"]
+DEFAULT_FORMATS = ["stepfamily", "inlaws", "cheating", "bestfriend", "entitledfam", "drama", "revenge"]
 
 
 # --- ADN aléatoire -----------------------------------------------------------
+# Chaque « graine » est cohérente : qui fait du tort, ce qu'il fait, et pour quels formats elle convient.
+# Le levier secret, la scène de révélation et la conséquence sont tirés à part pour multiplier les combinaisons.
 
 JOBS = [
-    "barista in an upscale coffee shop", "night-shift nurse", "car mechanic", "middle-school teacher",
-    "real-estate assistant", "wedding planner", "supermarket cashier", "junior accountant", "bartender",
-    "delivery driver", "hairdresser", "IT support technician", "hotel receptionist", "physiotherapy student",
-    "bank teller", "personal trainer", "flight attendant", "pharmacy assistant", "line cook", "dog groomer",
-    "event photographer", "call-center agent", "construction site manager", "florist", "veterinary assistant",
-    "university student working part-time", "stay-at-home parent", "small bakery owner", "insurance adjuster",
-    "lifeguard", "electrician", "dental hygienist",
+    "night-shift nurse", "car mechanic", "middle-school teacher", "real-estate assistant", "supermarket cashier",
+    "junior accountant", "bartender", "delivery driver", "hairdresser", "IT support technician", "hotel receptionist",
+    "bank teller", "flight attendant", "pharmacy assistant", "line cook", "veterinary assistant", "data analyst",
+    "university student working weekends", "small bakery owner", "electrician", "dental hygienist", "paralegal",
+    "high-school senior with a part-time job", "software developer", "social worker", "physical therapist",
 ]
 
-SETTINGS = [
-    "a family barbecue that got out of hand", "a cousin's wedding", "a tiny apartment with paper-thin walls",
-    "the office open space", "a school parents' meeting", "a luxury neighborhood", "a cruise ship",
-    "a road trip with in-laws", "a 24-hour diner", "a gym at 6am", "a hospital waiting room",
-    "a small-town supermarket", "a ski resort", "a group chat that leaked", "a birthday dinner at a fancy restaurant",
-    "an airport gate during a delay", "a homeowners association meeting", "a holiday dinner",
-    "a bachelorette weekend", "a shared vacation rental", "a parking lot dispute", "a job interview",
-    "a high-school reunion", "a funeral reception", "a baby shower", "a garage sale", "a camping trip",
-    "a car dealership", "a hair salon on a Saturday", "a moving day",
+PREMISES = [
+    ("stepfamily", "a stepmother who moves in and tells the narrator they are 'on their own now', while her own "
+                   "daughter gets everything"),
+    ("stepfamily", "a stepfather who sells the late mother's belongings and turns her sewing room into his man cave"),
+    ("stepfamily", "a stepmother who spends the college fund the late mother left on her own child's hobbies"),
+    ("stepfamily", "a step-sister who wears the dead mother's jewelry and mocks the narrator's grief"),
+    ("stepfamily", "a father's new wife who 'forgets' the narrator at every family event and cuts them out of photos"),
+    ("inlaws", "a mother-in-law who wears white to the wedding and tries to give a speech about the 'real' bride"),
+    ("inlaws", "a mother-in-law who tells everyone the baby isn't her son's and demands a DNA test"),
+    ("inlaws", "a mother-in-law who secretly redecorates the couple's house with her own key"),
+    ("inlaws", "a father-in-law who tries to get the narrator fired so his son will 'come home'"),
+    ("inlaws", "a mother-in-law who teaches the grandchild to call her 'mama'"),
+    ("cheating", "a fiance who sends the exact same love message to several other women"),
+    ("cheating", "a husband who announces he is dating the narrator's sister and expects everyone to adapt"),
+    ("cheating", "a husband who skips the anniversary dinner and brings his affair partner to the couple's home"),
+    ("cheating", "a boyfriend whose 'work trips' are weekends with a second family"),
+    ("cheating", "a wife who empties the joint savings for a lover while planning a vow renewal"),
+    ("bestfriend", "a best friend who makes the narrator dress plain so she can shine, then sabotages their date"),
+    ("bestfriend", "a best friend who fakes an illness to get sympathy, money and excuses for cruel behavior"),
+    ("bestfriend", "a best friend who takes credit for the narrator's business idea and pitches it as her own"),
+    ("bestfriend", "a maid of honor who secretly tries to get the narrator's wedding cancelled"),
+    ("bestfriend", "a roommate and best friend who reads the narrator's messages and leaks them to the group chat"),
+    ("comeback", "a crush who pretends to like the narrator back, then laughs about it in front of the whole class"),
+    ("comeback", "a classmate who humiliates the narrator's homemade gift in front of everyone"),
+    ("comeback", "a coworker who mocks the narrator's 'cheap' clothes and job at the team party"),
+    ("comeback", "a cousin who calls the narrator the family failure at every holiday"),
+    ("entitledfam", "a mother who demands the narrator quit a well-paid job to raise a brother's kids"),
+    ("entitledfam", "parents who expect the narrator to pay for the golden child's wedding"),
+    ("entitledfam", "a sister who moves in 'for two weeks' and tries to take over the narrator's apartment"),
+    ("entitledfam", "a brother who opens credit cards in the narrator's name to cover his debts"),
+    ("entitledfam", "grandparents who give everything to one grandchild and ask the narrator to sign away the rest"),
+    ("drama", "a partner who hides a huge debt and asks the narrator to co-sign a loan"),
+    ("drama", "a group of friends who plan a trip using the narrator's card and 'forget' to invite them"),
+    ("drama", "a nanny who slowly turns the narrator's child against them"),
+    ("drama", "a friend who calls the narrator's partner horrible names, then blames a fake condition"),
+    ("revenge", "a neighbor who parks in front of the narrator's garage and gets their car towed instead"),
+    ("revenge", "a landlord who keeps the full deposit with fake damage photos"),
+    ("revenge", "a boss who steals the narrator's project and presents it to the CEO"),
+    ("revenge", "a wedding guest who tries to turn the narrator's wedding into a gender reveal"),
+    ("workplace", "a manager who makes the narrator train his nephew, then gives the nephew the promotion"),
+    ("workplace", "a coworker who reports the narrator to HR with invented complaints"),
+    ("entitled", "a customer who demands a refund for a cake she already ate half of, then calls the narrator's boss"),
+    ("entitled", "an HOA president who fines the narrator for a mailbox color he chose himself"),
+    ("family", "a father who reveals at Christmas dinner that the inheritance goes to his secret second family"),
+    ("family", "parents who skip the narrator's graduation for the sibling's soccer game"),
+    ("karma", "a stranger who cuts the line, insults the cashier and turns out to be meeting her for a job interview"),
+    ("love", "a date who orders the most expensive dish and 'forgets' his wallet for the third time"),
+    ("wholesome", "a grumpy neighbor everyone avoids who turns out to have been protecting the narrator for years"),
+    ("aita", "a sister who demands the narrator cancel their own wedding because it is on her birthday weekend"),
+    ("askreddit", "a coworker whose lies become so elaborate that the whole office starts playing along"),
+    ("school", "a teacher who accuses the narrator's kid of cheating because the essay is 'too good'"),
+    ("creepy", "a new neighbor who knows details about the narrator's routine they never shared"),
 ]
 
-SIDE_CHARACTERS = [
-    "a manipulative best friend", "a mother-in-law who keeps score", "a spoiled coworker whose dad owns everything",
-    "an overconfident neighbor", "a deadpan teenager", "a too-perfect new boyfriend", "a lazy roommate",
-    "a boss who steals credit", "a sister who always plays the victim", "a grandma with zero filter",
-    "a principal at the end of her patience", "a landlord who ignores every rule", "an influencer who wants freebies",
-    "a quiet coworker who saw everything", "a toddler with perfect timing", "an ex who reappears",
-    "a twin nobody talks about", "a security guard who takes his job very seriously", "a karen with a coupon",
-    "a dad who communicates only in puns",
+LEVERAGES = [
+    "a house deed the late parent quietly put in the narrator's name", "a separate savings account the villain never knew about",
+    "screenshots with timestamps", "a reference list with numbers of the villain's past victims",
+    "a lease with the narrator's name only", "an old will with a surprise condition", "a voice message saved by accident",
+    "a receipt kept in a drawer for years", "a doorbell camera the villain forgot about", "a group chat the narrator was never removed from",
+    "a lawyer cousin who reads the fine print", "a grandmother who kept every document", "a coworker who saw everything and kept notes",
+    "a joint bank statement", "a notebook the villain wrote in", "the narrator's own calm, documented paper trail",
 ]
 
-TWISTS = [
-    "the villain exposes themselves in front of everyone", "a receipt, screenshot or recording surfaces at the worst moment",
-    "an unexpected ally switches sides", "a rule the antagonist ignored destroys them", "a misunderstanding with a hilarious reveal",
-    "the narrator's quiet detail planted at the start becomes the key", "karma arrives through a total stranger",
-    "malicious compliance backfires on the person giving orders", "a secret identity or relationship is revealed",
-    "the 'victim' was the planner all along", "a child innocently says the one thing that ruins the lie",
-    "the person everyone underestimated wins", "a public announcement goes horribly wrong",
-    "an inheritance or will contains a surprise condition", "the narrator turns out to be the hero of someone else's story",
+REVEAL_SCENES = [
+    "a family dinner", "the engagement party", "the wedding reception", "a holiday gathering", "a 'family meeting' the narrator calls",
+    "a team meeting with the CEO present", "a birthday party", "a court hearing", "the reading of a will", "graduation day",
+    "a baby shower", "a housewarming",
+]
+
+CONSEQUENCES = [
+    "the villain loses the house they thought was theirs", "the villain loses their job and reputation",
+    "the villain's partner leaves them on the spot", "the friend group and family finally see who they are",
+    "the villain has to repay everything", "the villain begs and the narrator calmly says no",
+    "the villain is exposed in front of the people whose opinion they cared about most",
+    "an earned, bittersweet reconciliation on the narrator's terms",
 ]
 
 DEVICES = [
-    "an absurd comparison involving the tax office", "a repeated phrase used three times for rhythm",
-    "a self-deprecating aside from the narrator", "a deadpan one-line reaction", "a rule-of-three list",
-    "a hyper-specific number that becomes a running gag", "a sound described in a funny way",
-    "a facial expression described like a nature documentary",
+    "the villain's catchphrase thrown back at them at the end", "a repeated phrase used three times for rhythm",
+    "a self-deprecating aside from the narrator", "a deadpan one-line reaction", "a hyper-specific amount of money that comes back at the end",
+    "an object that appears broken at the start and whole at the end", "the narrator counting down the days",
 ]
 
-ENGINES = [
-    "injustice that turns into satisfying karma", "humiliation that turns into triumph", "confusion that turns into a reveal",
-    "panic that turns into laughter", "suspicion that turns into proof", "guilt that turns into relief",
-    "jealousy that turns into exposure",
-]
+
+LIGHT_FORMATS = {"askreddit", "wholesome", "creepy", "love", "school", "karma"}
 
 
 @dataclass
 class StoryDNA:
     narrator: str
-    setting: str
-    side_character: str
-    engine: str
-    twist: str
+    premise: str
+    leverage: str
+    reveal: str
+    consequence: str
     device: str
 
     def as_prompt(self) -> str:
-        return (
-            f"- Narrator: {self.narrator}\n"
-            f"- Setting / situation: {self.setting}\n"
-            f"- Key side character: {self.side_character}\n"
-            f"- Emotional engine: {self.engine}\n"
-            f"- Payoff type: {self.twist}\n"
-            f"- Comedic device to include at least once: {self.device}"
-        )
+        lines = [f"- Narrator: {self.narrator}", f"- Premise: {self.premise}"]
+        if self.leverage:
+            lines += [f"- Leverage planted early (ordinary at first): {self.leverage}",
+                      f"- Where the truth comes out: {self.reveal}", f"- Payoff: {self.consequence}"]
+        lines.append(f"- Texture to include once: {self.device}")
+        return "\n".join(lines)
 
 
-def random_dna(narrator_gender: str = "any", rng: random.Random | None = None) -> StoryDNA:
+def random_dna(narrator_gender: str = "any", rng: random.Random | None = None, fmt: str = "") -> StoryDNA:
     rng = rng or random.Random()
     gender = narrator_gender if narrator_gender in ("male", "female") else rng.choice(["male", "female"])
-    age = rng.randint(19, 46)
+    age = rng.randint(17, 42)
     who = "man" if gender == "male" else "woman"
+    if age < 19:
+        who = "boy" if gender == "male" else "girl"
     narrator = f"{age}-year-old {who}, {rng.choice(JOBS)}"
+    pool = [p for f, p in PREMISES if f == fmt] or [p for _, p in PREMISES]
+    light = fmt in LIGHT_FORMATS  # formats légers : pas de levier ni de règlement de comptes imposés
     return StoryDNA(
         narrator=narrator,
-        setting=rng.choice(SETTINGS),
-        side_character=rng.choice(SIDE_CHARACTERS),
-        engine=rng.choice(ENGINES),
-        twist=rng.choice(TWISTS),
+        premise=rng.choice(pool),
+        leverage="" if light else rng.choice(LEVERAGES),
+        reveal="" if light else rng.choice(REVEAL_SCENES),
+        consequence="" if light else rng.choice(CONSEQUENCES),
         device=rng.choice(DEVICES),
     )

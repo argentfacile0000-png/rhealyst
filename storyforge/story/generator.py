@@ -491,7 +491,7 @@ class StoryGenerator:
         valid = [f for f in (formats or []) if f in FORMATS] or DEFAULT_FORMATS
         fmt = FORMATS[rng.choice(valid)]
         lang = get_language(language)
-        dna = random_dna(narrator_gender, rng)
+        dna = random_dna(narrator_gender, rng, fmt.key)
         words = words_for_duration(seconds_per_part, lang.code, voice_speed, speedup)
         # ~2 jetons par mot (français, guillemets échappés) + métadonnées : marge pour ne pas couper l'histoire.
         self.need_tokens = int(words * parts * 2.2) + 1500
