@@ -83,13 +83,11 @@ vidéo est publiée avec une image automatique.
   les programmations sont conservées après un redémarrage et rattrapées si l'heure est passée entre-temps.
 - **Ajout par lien (YouTube…).** Envoie un lien au bot à tout moment : il propose de l'ajouter à la banque vidéo
   (choix de la catégorie) ou à la bande son. Depuis un serveur, YouTube refuse souvent les téléchargements (« Sign in to confirm
-  you're not a bot ») : l'adresse IP est celle d'un datacenter. Banque vidéo → **Réglages YouTube** : envoie
-  le `cookies.txt` d'une session YouTube connectée (exporté depuis une fenêtre privée, idéalement avec un compte
-  secondaire), un proxy (`http://user:pass@hote:port`, `socks5://…`) ou une **liste de proxies** en `.txt`
-  (une adresse par ligne : `ip:port`, `user:pass@ip:port`, `ip:port:user:pass` ; un fichier `socks5.txt` est lu en
-  SOCKS5). Le bot teste la liste, garde les proxies qui joignent YouTube et passe au suivant dès qu'un
-  téléchargement échoue. Puis **Tester avec YouTube**. Sinon,
-  télécharge la vidéo sur ton ordinateur et dépose-la dans `data/backgrounds/<catégorie>/`.
+  you're not a bot ») : l'adresse IP est celle d'un datacenter. Dans ce cas, StoryForge passe tout seul par des
+  proxies gratuits fournis par l'API publique de [Proxora](https://proxora.io/free-proxy-list/api) (vérifiés
+  récemment, sorties résidentielles et mobiles en priorité), en changeant de proxy dès qu'un essai échoue. Aucun
+  réglage : Banque vidéo → Réglages YouTube montre leur nombre et permet de tester. Sinon, télécharge la vidéo
+  sur ton ordinateur et dépose-la dans `data/backgrounds/<catégorie>/`.
 - **Bande son.** Accueil → **Bande son** → Ajouter une piste : envoie un fichier audio (mp3, m4a, wav, ogg, flac),
   une vidéo dont on garde le son, ou un lien (YouTube, SoundCloud…). Chaque vidéo tire une piste au hasard et la
   démarre à un moment au hasard, avec fondu d'entrée et de sortie, mixée sous la voix. Par chaîne (Réglages →

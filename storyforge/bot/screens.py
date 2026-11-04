@@ -577,56 +577,26 @@ async def bank(svc: Services) -> Screen:
 
 
 async def ytdlp_settings(svc: Services) -> Screen:
-    from ..tools import PROXY_KEY, cookies_path, mask_proxy, proxy_rotation, proxy_state
+    from ..tools import proxora_proxies, proxora_status
 
-    cookies = cookies_path(svc.settings)
-    plist = await proxy_state()
-    usable = len(await proxy_rotation())
-    proxy = await db.kv_get(PROXY_KEY, "") or svc.settings.ytdlp_proxy
-    if cookies.is_file():
-        added = datetime.fromtimestamp(cookies.stat().st_mtime, timezone.utc).replace(tzinfo=None)
-        cookie_state = f"{CHECK} enregistrés, mis à jour le {to_local(added, tz(svc)):%d/%m %H:%M}"
-    else:
-        cookie_state = muted("aucun")
+    await proxora_proxies()  # liste en cache (10 min) : lecture rapide
+    st = proxora_status()
+    age = f", mise à jour il y a {int(st['age'] // 60)} min" if st["age"] is not None else ""
     lines = [
         title("Réglages YouTube"),
         muted("Pour ajouter une vidéo : envoie simplement son lien au bot, ou Banque vidéo, Ajouter."),
-        muted("YouTube bloque souvent les serveurs (adresse de datacenter) : « Sign in to confirm you're not a bot ». "
-              "Deux solutions : les cookies d'une session YouTube connectée, ou un proxy."),
         "",
         row("yt-dlp", "installé" if ytdlp_command() else "non installé"),
-        f"Cookies YouTube  {cookie_state}",
-        f"Proxy  {esc(mask_proxy(proxy)) if proxy else muted('aucun')}",
-        "Liste de proxies  " + (
-            (f"<b>{len(plist['list'])}</b> adresses, " + (f"{len(plist['ok'])} fonctionnelles au dernier test"
-                                                          if plist["tested_at"] else "pas encore testées")
-             + f", {usable} utilisables") if plist["list"] else muted("aucune")),
+        row("Proxies gratuits Proxora", f"{st['count']} disponibles{age}" if st["count"]
+            else f"indisponibles ({st['error'] or 'liste vide'})"),
+        row("Mis de côté (échec récent)", st["bad"]),
         "",
-        "<b>Cookies YouTube</b>",
-        "1. Sur ton ordinateur, ouvre une fenêtre de navigation privée et connecte-toi à YouTube, "
-        "de préférence avec un compte secondaire.",
-        "2. Avec l'extension <i>Get cookies.txt LOCALLY</i> (Chrome) ou <i>cookies.txt</i> (Firefox), "
-        "exporte les cookies de youtube.com.",
-        "3. Ferme la fenêtre privée (sinon YouTube renouvelle la session et le fichier expire), "
-        "puis envoie le fichier ici.",
-        muted("YouTube peut restreindre un compte qui télécharge beaucoup : évite ton compte principal."),
-        "",
-        "<b>Proxy</b>",
-        "Un proxy résidentiel (ou une connexion qui passe par chez toi) donne une adresse de particulier : "
-        "<code>http://utilisateur:motdepasse@hote:port</code> ou <code>socks5://hote:1080</code>.",
-        "",
-        "<b>Liste de proxies</b>",
-        "Envoie un fichier .txt (une adresse par ligne) : le bot teste chaque proxy, garde ceux qui joignent "
-        "YouTube et passe au suivant dès qu'un téléchargement échoue. Un proxy unique, s'il est réglé, est prioritaire.",
-        muted("Les proxies gratuits sont lents, meurent vite et beaucoup sont déjà bloqués par YouTube. "
-              "Le trafic reste chiffré (HTTPS), mais évite de les combiner avec tes cookies : YouTube n'aime pas "
-              "voir un compte se connecter depuis des dizaines d'adresses."),
+        muted("Chaque lien est d'abord téléchargé en direct. Si YouTube bloque le serveur (adresse de datacenter), "
+              "je passe automatiquement par des proxies gratuits de Proxora, vérifiés récemment, en privilégiant "
+              "les sorties résidentielles et mobiles. Aucun réglage à faire."),
     ]
-    rows = [[("Envoyer cookies.txt", "yta")] + ([("Retirer les cookies", "ytx")] if cookies.is_file() else []),
-            [("Proxy", "ytp")] + ([("Retirer le proxy", "ytpx")] if proxy else []),
-            [("Envoyer une liste (.txt)", "ytl")]
-            + ([("Retester la liste", "ytlt"), ("Retirer la liste", "ytlx")] if plist["list"] else []),
-            [("Tester avec YouTube", "ytt"), ("Ajouter une vidéo", "bka")],
+    rows = [[("Tester avec YouTube", "ytt"), ("Rafraîchir les proxies", "ytr")],
+            [("Ajouter une vidéo", "bka")],
             [("← Médias", "md"), ("← Réglages", "set")]]
     return "\n".join(lines), kb(rows)
 

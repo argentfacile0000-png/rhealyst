@@ -43,7 +43,7 @@ def test_ytdlp_hints():
     assert tools.ytdlp_hint("autre erreur") == "autre erreur"
 
 
-# ---------------------------------------------------------------- cookies et proxy
+# ---------------------------------------------------------------- proxies gratuits Proxora
 import os  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
 
@@ -52,66 +52,101 @@ import pytest  # noqa: E402
 from storyforge.bot import handlers  # noqa: E402
 
 from .conftest import needs_ffmpeg  # noqa: E402
-from .test_bot import FakeMessage, click, make_ctx, type_text  # noqa: E402
+from .test_bot import click, make_ctx, type_text  # noqa: E402
 
-COOKIES = (b"# Netscape HTTP Cookie File\n"
-           b".youtube.com\tTRUE\t/\tTRUE\t1893456000\tSAPISID\tabc\n"
-           b"#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t1893456000\t__Secure-3PSID\tdef\n"
-           b".google.com\tTRUE\t/\tTRUE\t1893456000\tSID\tghi\n")
+@pytest.fixture(autouse=True)
+def fresh_proxy_state():
+    tools._bad.clear()
+    tools._good.clear()
+    tools._proxora.update(at=0.0, items=[], error="")
+    yield
 
 
-def test_parse_cookies_and_proxy():
-    text, count = tools.parse_cookies(COOKIES)
-    assert count == 3 and text.startswith("# Netscape")
-    text, _ = tools.parse_cookies(COOKIES.split(b"\n", 1)[1])  # sans en-tête : ajouté
-    assert text.startswith("# Netscape HTTP Cookie File\n")
-    with pytest.raises(ValueError, match="Netscape"):
-        tools.parse_cookies(b'{"cookies": []}')
-    with pytest.raises(ValueError, match="youtube.com"):
-        tools.parse_cookies(b".example.com\tTRUE\t/\tTRUE\t0\ta\tb\n")
-    assert tools.check_proxy(" socks5://h:1080 ") == "socks5://h:1080"
-    with pytest.raises(ValueError):
-        tools.check_proxy("ftp://h")
-    assert tools.mask_proxy("http://user:secret@h:8080") == "http://•••@h:8080"
+ITEMS = [
+    {"host": "1.1.1.1", "port": 80, "protocol": "http", "exit_type": "hosting", "https": True, "score": 100},
+    {"host": "2.2.2.2", "port": 1080, "protocol": "socks5", "exit_type": "isp", "https": True, "score": 70},
+    {"host": "2.2.2.2", "port": 1081, "protocol": "socks5", "exit_type": "isp", "https": True, "score": 90},
+    {"host": "3.3.3.3", "port": 8080, "protocol": "http", "exit_type": "mobile", "https": False, "score": 99},
+    {"host": "4.4.4.4", "port": 3128, "protocol": "http", "exit_type": "isp", "https": True, "tampered": True},
+]
+
+
+def test_proxora_ranking_prefers_residential_and_clean():
+    assert tools._rank(ITEMS) == ["socks5://2.2.2.2:1081", "http://3.3.3.3:8080", "http://1.1.1.1:80"]
+
+
+async def test_proxora_fetch_is_cached(monkeypatch):
+    import httpx
+
+    calls = []
+
+    def handler(request):
+        calls.append(dict(request.url.params))
+        return httpx.Response(200, json={"items": ITEMS if request.url.params.get("exit") == "isp" else []})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    first = await tools.proxora_proxies()
+    assert first[0] == "socks5://2.2.2.2:1081" and calls[0]["format"] == "json" and calls[0]["https"] == "true"
+    n = len(calls)
+    assert await tools.proxora_proxies() == first and len(calls) == n  # cache 10 min (limite par IP)
+    await tools.proxora_proxies(force=True)
+    assert len(calls) == 2 * n
+    assert tools.proxora_status()["count"] == 3
 
 
 @needs_ffmpeg
-async def test_ytdlp_settings_from_the_bot(svc, tmp_path, monkeypatch):
-    svc.settings.google_client_secrets_file = tmp_path / "secrets" / "google_client_secret.json"
+async def test_direct_first_then_proxora_proxies(svc, tmp_path, monkeypatch):
+    log = tmp_path / "calls.log"
+    fake = tmp_path / "yt-dlp"
+    fake.write_text(f"""#!/bin/sh
+echo "$@" >> {log}
+case "$*" in
+  *gone*) echo "ERROR: Video unavailable" >&2; exit 1 ;;
+  *http://good:8080*) echo "/tmp/ok.mp4"; exit 0 ;;
+  *vimeo*) echo "/tmp/direct.mp4"; exit 0 ;;
+  *) echo "ERROR: Sign in to confirm you're not a bot" >&2; exit 1 ;;
+esac
+""")
+    os.chmod(fake, 0o755)
+    monkeypatch.setattr(tools, "ytdlp_command", lambda: [str(fake)])
+    fetched = []
+
+    async def proxora(force=False):
+        fetched.append(force)
+        return ["http://bad1:8080", "http://bad2:8080", "http://good:8080"]
+
+    monkeypatch.setattr(tools, "proxora_proxies", proxora)
+    # Un site qui ne bloque pas : téléchargement direct, la liste Proxora n'est même pas lue
+    res = await tools.run_ytdlp(svc.settings, ["--", "https://vimeo.com/1"])
+    assert res.ok and res.proxy is None and res.attempts == 1 and not fetched
+    # YouTube bloque le serveur : direct, puis proxies jusqu'à celui qui marche
+    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/x"])
+    assert res.ok and res.proxy == "http://good:8080" and res.attempts == 4
+    assert "--socket-timeout" in log.read_text()
+    assert set(tools._bad) == {"http://bad1:8080", "http://bad2:8080"} and tools._good == ["http://good:8080"]
+    # Les proxies en échec sont mis de côté, celui qui a marché passe en premier
+    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/x"])
+    assert res.ok and res.attempts == 2
+    # Erreur définitive : pas de rotation
+    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/gone"])
+    assert not res.ok and res.attempts == 1
+
+
+@needs_ffmpeg
+async def test_youtube_settings_screen(svc, tmp_path, monkeypatch):
     ctx, bot = make_ctx(svc)
+
+    async def proxora(force=False):
+        tools._proxora.update(at=1.0, items=["http://good:8080"], error="")
+        return ["http://good:8080"]
+
+    monkeypatch.setattr(tools, "proxora_proxies", proxora)
     q = await click(ctx, "yt")
-    assert "Réglages YouTube" in q.edits[-1] and "cookies" in q.edits[-1].lower()
-    assert await tools.ytdlp_options(svc.settings) == tools.js_runtime_args()
-
-    # Cookies envoyés en fichier
-    await click(ctx, "yta")
-
-    class TgFile:
-        async def download_as_bytearray(self):
-            return bytearray(COOKIES)
-
-    async def get_file():
-        return TgFile()
-
-    msg = FakeMessage("")
-    msg.document = SimpleNamespace(file_name="cookies.txt", file_size=len(COOKIES), get_file=get_file)
-    upd = SimpleNamespace(callback_query=None, effective_user=SimpleNamespace(id=42),
-                          effective_chat=SimpleNamespace(id=42), effective_message=msg)
-    await handlers.on_file(upd, ctx)
-    path = tools.cookies_path(svc.settings)
-    assert msg.deleted and path.is_file() and oct(path.stat().st_mode & 0o777) == "0o600"
-    assert any("Cookies enregistrés (3" in t for t in bot.sent)
-
-    # Proxy saisi (message supprimé, valeur masquée à l'écran)
-    await click(ctx, "ytp")
-    m = await type_text(ctx, "http://moi:secret@proxy.example:8080")
-    assert m.deleted
-    opts = await tools.ytdlp_options(svc.settings)
-    assert opts[-4:] == ["--cookies", str(path), "--proxy", "http://moi:secret@proxy.example:8080"]
-    q = await click(ctx, "yt")
-    assert "secret" not in q.edits[-1] and "•••@proxy.example" in q.edits[-1]
-
-    # Test : yt-dlp factice qui affiche le titre
+    assert "Proxora" in q.edits[-1] and "1 disponibles" in q.edits[-1]
+    assert "cookies" not in q.edits[-1].lower()
+    q = await click(ctx, "ytr")
+    assert q.answers[-1] == "1 proxies gratuits disponibles"
     fake = tmp_path / "yt-dlp"
     fake.write_text("#!/bin/sh\necho 'Me at the zoo'\n")
     os.chmod(fake, 0o755)
@@ -126,160 +161,7 @@ async def test_ytdlp_settings_from_the_bot(svc, tmp_path, monkeypatch):
 
     monkeypatch.setattr(bot, "send_message", send_message)
     await click(ctx, "ytt")
-    assert edits and "YouTube répond" in edits[-1] and "Me at the zoo" in edits[-1]
-    fake.write_text("#!/bin/sh\necho \"ERROR: Sign in to confirm you're not a bot\" >&2\nexit 1\n")
-    await click(ctx, "ytt")
-    assert "refuse" in edits[-1] and "datacenter" in edits[-1]
-
-    await click(ctx, "ytx")
-    await click(ctx, "ytpx")
-    assert not path.exists() and await tools.ytdlp_options(svc.settings) == tools.js_runtime_args()
-
-
-# ---------------------------------------------------------------- liste de proxies
-def test_parse_proxy_list_formats():
-    text = """# liste gratuite
-1.2.3.4:8080
-1.2.3.4:8080
-user:pass@5.6.7.8:3128
-9.9.9.9:1080:bob:secret
-socks5://10.0.0.1:1080
-n'importe quoi
-proxy.example.com:80 extra-colonne
-"""
-    assert tools.parse_proxy_list(text) == [
-        "http://1.2.3.4:8080", "http://user:pass@5.6.7.8:3128", "http://bob:secret@9.9.9.9:1080",
-        "socks5://10.0.0.1:1080", "http://proxy.example.com:80",
-    ]
-    assert tools.parse_proxy_list("1.2.3.4:1080", "socks5_proxies.txt") == ["socks5://1.2.3.4:1080"]
-    assert tools.parse_proxy_list("1.2.3.4:1080", "SOCKS4.TXT") == ["socks4://1.2.3.4:1080"]
-
-
-@needs_ffmpeg
-async def test_downloads_rotate_through_the_proxy_list(svc, tmp_path, monkeypatch):
-    log = tmp_path / "calls.log"
-    fake = tmp_path / "yt-dlp"
-    # Ne réussit qu'avec le proxy « good » ; « gone » simule une vidéo supprimée (inutile de réessayer)
-    fake.write_text(f"""#!/bin/sh
-echo "$@" >> {log}
-case "$*" in
-  *gone*) echo "ERROR: Video unavailable" >&2; exit 1 ;;
-  *http://good:8080*) echo "/tmp/ok.mp4"; exit 0 ;;
-  *) echo "ERROR: Sign in to confirm you're not a bot" >&2; exit 1 ;;
-esac
-""")
-    os.chmod(fake, 0o755)
-    monkeypatch.setattr(tools, "ytdlp_command", lambda: [str(fake)])
-    await tools.set_proxy_list(["http://bad1:8080", "http://bad2:8080", "http://good:8080"])
-
-    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/x"])
-    assert res.ok and res.proxy == "http://good:8080" and res.attempts == 3
-    assert "--socket-timeout" in log.read_text()
-    assert (await tools.proxy_rotation())[0] == "http://good:8080"  # les proxies en échec sont mis de côté
-    st = await tools.proxy_state()
-    assert set(st["bad"]) == {"http://bad1:8080", "http://bad2:8080"} and st["ok"] == ["http://good:8080"]
-
-    log.write_text("")
-    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/x"])
-    assert res.ok and res.attempts == 1  # le dernier proxy qui a marché passe en premier
-
-    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/gone"])
-    assert not res.ok and res.attempts == 1 and "unavailable" in res.error  # erreur définitive : pas de rotation
-
-    # Un proxy unique réglé est prioritaire sur la liste
-    from storyforge import db
-
-    await db.kv_set(tools.PROXY_KEY, "http://good:8080")
-    log.write_text("")
-    res = await tools.run_ytdlp(svc.settings, ["--", "https://youtu.be/x"])
-    assert res.ok and res.proxy is None and log.read_text().count("--proxy") == 1
-
-
-@needs_ffmpeg
-async def test_proxy_list_from_the_bot(svc, monkeypatch):
-    import asyncio
-
-    ctx, bot = make_ctx(svc)
-    alive = {"socks5://1.1.1.1:1080", "socks5://3.3.3.3:1080"}
-
-    async def check(url, timeout=10.0):
-        return url in alive
-
-    monkeypatch.setattr(tools, "check_proxy_reaches_youtube", check)
-    await click(ctx, "ytl")
-    assert ctx.user_data["await"] == {"kind": "ytdlp_proxies"}
-    content = b"1.1.1.1:1080\n2.2.2.2:1080\n3.3.3.3:1080\n"
-
-    class TgFile:
-        async def download_as_bytearray(self):
-            return bytearray(content)
-
-    async def get_file():
-        return TgFile()
-
-    msg = FakeMessage("")
-    msg.document = SimpleNamespace(file_name="socks5.txt", file_size=len(content), get_file=get_file)
-    upd = SimpleNamespace(callback_query=None, effective_user=SimpleNamespace(id=42),
-                          effective_chat=SimpleNamespace(id=42), effective_message=msg)
-    await handlers.on_file(upd, ctx)
-    for _ in range(50):  # le test tourne en tâche de fond
-        await asyncio.sleep(0.02)
-        if (await tools.proxy_state())["tested_at"]:
-            break
-    st = await tools.proxy_state()
-    assert st["list"] == ["socks5://1.1.1.1:1080", "socks5://2.2.2.2:1080", "socks5://3.3.3.3:1080"]
-    assert st["ok"] == ["socks5://1.1.1.1:1080", "socks5://3.3.3.3:1080"]
-    assert await tools.proxy_rotation() == ["socks5://1.1.1.1:1080", "socks5://3.3.3.3:1080"]
-    assert any("3 proxies enregistrés" in t for t in bot.sent)
-    q = await click(ctx, "yt")
-    assert "3</b> adresses, 2 fonctionnelles" in q.edits[-1]
-
-    # Liste collée dans le message « Proxy »
-    await click(ctx, "ytp")
-    await type_text(ctx, "4.4.4.4:8080\n5.5.5.5:8080")
-    assert (await tools.proxy_state())["list"] == ["http://4.4.4.4:8080", "http://5.5.5.5:8080"]
-    await click(ctx, "ytlx")
-    for _ in range(20):  # le test lancé en fond se termine après le retrait
-        await asyncio.sleep(0.02)
-    assert (await tools.proxy_state())["list"] == []  # il ne remet pas l'ancienne liste
-
-
-@needs_ffmpeg
-async def test_proxy_test_never_hangs(svc, monkeypatch):
-    """Des proxies qui acceptent la connexion puis ne répondent jamais ne bloquent plus le test (bug « 950/1000 »)."""
-    import asyncio
-    import time
-
-    urls = [f"http://10.0.0.{i}:8080" for i in range(120)]
-    await tools.set_proxy_list(urls)
-
-    async def check(url, timeout=10.0):
-        n = int(url.split(".")[3].split(":")[0])
-        if n % 10 == 0:  # muet pour toujours
-            await asyncio.Event().wait()
-        return n % 2 == 1
-
-    monkeypatch.setattr(tools, "check_proxy_reaches_youtube", check)
-    seen = []
-
-    async def progress(done, total):
-        seen.append((done, total))
-
-    start = time.monotonic()
-    ok, total = await tools.test_proxy_list(progress, per_proxy=0.3, deadline=5)
-    assert time.monotonic() - start < 4
-    assert total == 120 and ok == 60 and seen[-1] == (120, 120)
-    st = await tools.proxy_state()
-    assert st["tested_at"] and len(st["ok"]) == 60 and "http://10.0.0.10:8080" in st["bad"]
-
-    # Limite globale : même si chaque essai traîne, le test se termine
-    async def slow(url, timeout=10.0):
-        await asyncio.sleep(60)
-
-    monkeypatch.setattr(tools, "check_proxy_reaches_youtube", slow)
-    start = time.monotonic()
-    ok, total = await tools.test_proxy_list(None, per_proxy=30, deadline=0.5)
-    assert time.monotonic() - start < 3 and ok == 0
+    assert "YouTube répond en direct" in edits[-1] and "Me at the zoo" in edits[-1]
 
 
 @needs_ffmpeg
@@ -354,6 +236,7 @@ dest=""; for a in "$@"; do [ "$prev" = "-o" ] && dest="$a"; prev="$a"; done
 dir=$(dirname "$dest"); mkdir -p "$dir"
 case "$*" in *http://slow:1*) echo "SFPROG   5.0%|1.00KiB/s|99:00|50.00MiB"; sleep 30; exit 1 ;; esac
 case "$*" in *hang*) echo "SFPROG  12.0%|1.00MiB/s|10:00|50.00MiB"; sleep 30; exit 1 ;; esac
+case "$*" in *--proxy*) ;; *blocked*) echo "ERROR: Sign in to confirm you're not a bot" >&2; exit 1 ;; esac
 for p in 10.0 55.5 100.0; do echo "SFPROG  $p%|2.10MiB/s|00:05|50.00MiB"; sleep 0.1; done
 touch "$dir/partiel.f137.mp4.part"
 cp {src} "$dir/Fond_ASMR-xyz.mp4"
@@ -407,12 +290,15 @@ echo "$dir/Fond_ASMR-xyz.mp4"
     await asyncio.wait_for(task, timeout=5)
     assert edits[-1] == "✕ Téléchargement annulé." and not handlers.DOWNLOADS
 
-    # Proxy muet : coupé faute de progression, le suivant prend le relais
-    await tools.set_proxy_list(["http://slow:1", "http://fast:2"])
-    res = await tools.run_ytdlp(svc.settings, ["-o", str(tmp_path / "x" / "%(title)s.%(ext)s"), "--", "u"],
+    # Bloqué en direct, proxy muet coupé faute de progression, le suivant prend le relais
+    async def proxora(force=False):
+        return ["http://slow:1", "http://fast:2"]
+
+    monkeypatch.setattr(tools, "proxora_proxies", proxora)
+    res = await tools.run_ytdlp(svc.settings, ["-o", str(tmp_path / "x" / "%(title)s.%(ext)s"), "--", "blocked"],
                                 on_progress=lambda p: asyncio.sleep(0), stall=1)
-    assert res.ok and res.proxy == "http://fast:2" and res.attempts == 2
-    assert "http://slow:1" in (await tools.proxy_state())["bad"]
+    assert res.ok and res.proxy == "http://fast:2" and res.attempts == 3
+    assert "http://slow:1" in tools._bad
 
 
 def test_parse_progress_from_real_ytdlp_lines():
