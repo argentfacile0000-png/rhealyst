@@ -101,6 +101,26 @@ def _split_evenly(text: str, n: int) -> list[str]:
     return [" ".join(p) for p in parts if p]
 
 
+def parse_json_reply(content: str) -> dict | None:
+    """Objet JSON d'une réponse de modèle, même entouré de texte, de balises ``` ou avec des retours à la ligne
+    bruts dans les chaînes. None si aucun objet lisible."""
+    text = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", content or "").strip()
+    candidates = [text]
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(text[start:end + 1])
+    for cand in candidates:
+        try:
+            data = json.loads(cand, strict=False)  # strict=False : accepte les retours à la ligne dans les chaînes
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return data[0]
+    return None
+
+
 def _error_text(exc: Exception) -> str:
     """Texte complet d'une erreur d'API (certains fournisseurs mettent le message dans le corps)."""
     parts = [str(exc), str(getattr(exc, "body", "") or "")]
@@ -296,14 +316,24 @@ class StoryGenerator:
         usage = resp.usage
         pt = getattr(usage, "prompt_tokens", 0) or 0
         ct = getattr(usage, "completion_tokens", 0) or 0
-        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content)
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            m = re.search(r"\{.*\}", content, flags=re.S)
-            if not m:
-                raise StoryError("Réponse du modèle illisible (JSON attendu)")
-            data = json.loads(m.group(0))
+        data = parse_json_reply(content)
+        if data is None:
+            # Une seconde chance : on montre au modèle sa réponse et on redemande le seul objet JSON.
+            log.warning("Réponse non JSON, nouvel essai : %s", content[:200])
+            retry = messages + [
+                {"role": "assistant", "content": content[:6000] or "(vide)"},
+                {"role": "user", "content": "Your previous answer was not a valid JSON object. Return the same story "
+                                            "again as exactly one valid JSON object, with no text before or after it."},
+            ]
+            resp = await self._create(self._request_kwargs(retry, long_form), long_form)
+            content2 = (resp.choices[0].message.content or "").strip()
+            pt += getattr(resp.usage, "prompt_tokens", 0) or 0
+            ct += getattr(resp.usage, "completion_tokens", 0) or 0
+            data = parse_json_reply(content2)
+            if data is None:
+                start = re.sub(r"\s+", " ", content2 or content)[:160]
+                raise StoryError(f"Réponse du modèle illisible (JSON attendu). Début de la réponse : « {start} »"
+                                 if start else "Réponse du modèle vide (limite de jetons atteinte ?)")
         return data, pt, ct
 
     @staticmethod
@@ -311,8 +341,11 @@ class StoryGenerator:
         raw_parts = data.get("parts")
         if isinstance(raw_parts, str):
             raw_parts = [raw_parts]
-        if not raw_parts and data.get("story"):
-            raw_parts = [str(data["story"])]
+        if raw_parts and isinstance(raw_parts[0], dict):  # [{"text": ...}] ou [{"narration": ...}]
+            raw_parts = [p.get("text") or p.get("narration") or "" for p in raw_parts]
+        for key in ("narration", "story", "script", "text"):  # autres formats (prompt personnalisé)
+            if not raw_parts and data.get(key):
+                raw_parts = [str(data[key])]
         texts = [clean_narration(str(p)) for p in (raw_parts or []) if str(p).strip()]
         if not texts:
             raise StoryError("Le modèle n'a renvoyé aucune narration")
@@ -328,8 +361,12 @@ class StoryGenerator:
         data["hashtags"] = [re.sub(r"[^\w]", "", str(t)) for t in tags if re.sub(r"[^\w]", "", str(t))][:10]
         data["title"] = str(data.get("title") or texts[0][:90]).strip().strip('"')[:200]
         data["youtube_title"] = str(data.get("youtube_title") or data["title"]).strip().strip('"')[:100]
-        data["description"] = str(data.get("description") or "").strip()
-        data["tiktok_caption"] = str(data.get("tiktok_caption") or data["title"]).strip()[:2000]
+        if not data["hashtags"]:  # format sans hashtags : déduits de la catégorie
+            cat = re.sub(r"[^\w]", "", str(data.get("category") or "").lower())
+            data["hashtags"] = [t for t in ("storytime", cat, "histoire") if t][:3]
+        data["description"] = str(data.get("description") or data.get("hook") or "").strip()
+        data["tiktok_caption"] = str(data.get("tiktok_caption") or (
+            data["title"] + " " + " ".join(f"#{t}" for t in data["hashtags"][:4]))).strip()[:2000]
         return data
 
     async def generate(

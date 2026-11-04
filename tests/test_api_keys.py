@@ -344,3 +344,44 @@ async def test_story_system_prompt_from_settings(svc, monkeypatch):
     assert svc.pipeline.stories.system_prompt.startswith("Version fichier.")
     await click(ctx, "spr")
     assert svc.pipeline.stories.system_prompt is None
+
+
+def test_parse_json_reply_variants():
+    from storyforge.story.generator import parse_json_reply
+
+    assert parse_json_reply('```json\n{"title": "A"}\n```') == {"title": "A"}
+    assert parse_json_reply('Here is the story:\n{"title": "B", "narration": "Line one.\nLine two."}\nEnjoy!') == {
+        "title": "B", "narration": "Line one.\nLine two."}  # retour à la ligne brut dans la chaîne
+    assert parse_json_reply("pas du tout du JSON") is None
+
+
+async def test_story_with_the_viral_master_prompt_format(svc):
+    """Format du prompt « Viral storytime engine » : narration, hook, category, tone, estimated_duration_seconds."""
+    from types import SimpleNamespace
+
+    narration = ("My sister borrowed my car for one weekend and returned it with a parking ticket from a city she "
+                 "swore she never visited. I didn't say anything at first. Then the toll receipts arrived.")
+    reply = ('{"title": "The Toll Receipt", "hook": "My sister borrowed my car for one weekend and returned it with a '
+             'parking ticket from a city she swore she never visited.", "narration": "' + narration.replace(". ", ".\n")
+             + '", "category": "Family Drama", "tone": "suspicious", "estimated_duration_seconds": 12}')
+    replies = ["Sorry, here it is: " + reply[:40], reply]  # 1re réponse cassée : nouvel essai automatique
+    calls = []
+
+    async def create(**kw):
+        calls.append(kw["messages"])
+        content = replies.pop(0)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+                               usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20))
+
+    gen = svc.pipeline.stories
+    gen._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    story = await gen.generate(language="en", seconds_per_part=12)
+    assert story.title == "The Toll Receipt" and story.parts[0].startswith("My sister borrowed my car")
+    assert "family" in " ".join(story.hashtags).lower() and story.tiktok_caption.startswith("The Toll Receipt #")
+    assert len(calls) == 2 and "not a valid JSON" in calls[1][-1]["content"]
+
+    replies[:] = ["nope", "still nope"]
+    import pytest as _pytest
+
+    with _pytest.raises(gen_mod.StoryError, match="Début de la réponse : « still nope »"):
+        await gen.generate(language="en", seconds_per_part=12)
